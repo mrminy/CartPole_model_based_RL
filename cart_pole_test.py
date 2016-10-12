@@ -338,8 +338,8 @@ class ActorCriticLearner:
 def main():
     # TODO save history for reward model
     save_history = False
-    w_rollouts = True
-    n_games = 20
+    w_rollouts = False
+    n_games = 10
     full_state_action_history = []
     end_episode = []
     for i in range(n_games):
@@ -347,9 +347,9 @@ def main():
         env = gym.make('CartPole-v0')
         env.seed(1234)
         np.random.seed(1234)
-        env.monitor.start('./cartpole_0-pg-experiment', force=True)
+        #env.monitor.start('./cartpole_0-pg-experiment', force=True)
         # Learning Parameters
-        max_episodes = 10000
+        max_episodes = 1000
         episodes_before_update = 2
         discount = 0.85
         ac_learner = my_actor_critic_learner(env, max_episodes, episodes_before_update, discount, w_rollouts=w_rollouts)

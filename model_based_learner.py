@@ -114,10 +114,9 @@ def create_reward_model():
     net = tflearn.fully_connected(net, 128, activation='relu')
     net = tflearn.fully_connected(net, 128, activation='relu')
     net = tflearn.fully_connected(net, 1, activation='tanh')
-    net = tflearn.regression(net, optimizer='Adam', loss='mean_square', name="test1")
+    net = tflearn.regression(net, optimizer='Adam', loss='mean_square', name="test1", restore=False)
 
-    return tflearn.DNN(net, tensorboard_dir='/tmp/tflearn_logs/', tensorboard_verbose=3,
-                       checkpoint_path='reward_model/checkpoint')
+    return tflearn.DNN(net, tensorboard_dir='/tmp/tflearn_logs/', tensorboard_verbose=3)
 
 
 def train_reward_model(train_data_path='cartpole_data/train_reward.npy', test_data_path='cartpole_data/test_reward.npy',

@@ -1,6 +1,7 @@
 """
 This actor-critic agent is a modification from mohakbhardwaj's version. This is now a model-based implementation instead
 of a model-free. The transition model is pre-learned by gathered data and supervised learning. See model_based_learner.py
+Link: https://gym.openai.com/evaluations/eval_KhmXmmgmSManWEtxZJoLeg
 """
 import random
 
@@ -21,6 +22,7 @@ print("Generating reward model...")
 reward_model = model_based_learner.create_reward_model()
 print("Loading reward model...")
 reward_model.load('reward_model/cart_pole_reward_model.tflearn')
+#reward_model = None
 
 # Load transition_model once
 print("Loading transition model...")
@@ -73,7 +75,7 @@ class Actor:
         self.sess = tf.Session(graph=self.graph)
         self.sess.run(self.init)
 
-    def rollout_policy(self, timeSteps):
+    def rollout_policy(self, timeSteps, explore):
         """Rollout policy for one episode, update the replay memory and return total reward"""
         total_reward = 0
         curr_state = self.env.reset()
@@ -86,7 +88,7 @@ class Actor:
 
         for time in range(timeSteps):
             # Choose action based on current policy
-            action = self.choose_action(curr_state)
+            action = self.choose_action(curr_state, explore)
             # Execute the action in the environment and observe reward
             next_state, reward, done, info = self.env.step(action)
             # Update the total reward
@@ -120,64 +122,90 @@ class Actor:
         if total_reward > self.max_reward_for_game:
             self.max_reward_for_game = total_reward
 
-        if self.w_rollouts:
-            # Make imagination rollouts from model to gain even more experience from a random action policy
-            rollout_episode_states, rollout_episode_actions, rollout_episode_rewards, rollout_episode_next_states, rollout_episode_return_from_states = self.perform_imagination_rollouts(
-                episode_states, episode_next_states[-1])
-            episode_states = rollout_episode_states
-            episode_actions = rollout_episode_actions
-            episode_rewards = rollout_episode_rewards
-            episode_next_states = rollout_episode_next_states
-            episode_return_from_states = rollout_episode_return_from_states
+        #if self.w_rollouts:
+        #    # Make imagination rollouts from model to gain even more experience from a random action policy
+        #    rollout_episode_states, rollout_episode_actions, rollout_episode_rewards, rollout_episode_next_states, rollout_episode_return_from_states = self.perform_imagination_rollouts(
+        #        episode_states, episode_next_states[-1])
+        #    episode_states = rollout_episode_states
+        #    episode_actions = rollout_episode_actions
+        #    episode_rewards = rollout_episode_rewards
+        #    episode_next_states = rollout_episode_next_states
+        #    episode_return_from_states = rollout_episode_return_from_states
 
         # Update the global replay memory
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
                            episode_return_from_states)
         return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
 
-    def perform_imagination_rollouts(self, real_life_experience, last_episode):
-        # st0 = episode_states[n], st = episode_states[n+1], a = random_action, s' = model(st0, st, a), r = r_model(s')
-        # Make into a function
-        rollout_episode_states = []
-        rollout_episode_actions = []
-        rollout_episode_rewards = []
-        rollout_episode_next_states = []
-        rollout_episode_return_from_states = []
-        for n in range(len(real_life_experience)):
-            st0 = real_life_experience[n][:]
-            if n + 1 < len(real_life_experience):
-                st = real_life_experience[n + 1][:]
-            else:
-                st = last_episode[:]
-            a = np.random.choice(self.env.action_space.n)
-            state_representation = model_based_learner.generate_state_representation(st0, st, a)
-            s_dash = self.transition_model.predict(st0, st, a)
-            r_dash = self.reward_model.predict([state_representation])[0][0]
+    def perform_imagination_rollouts(self, time_steps):
+        """Rollout policy for one episode, update the replay memory and return total reward"""
+        total_reward = 0
+        curr_state = self.env.reset() # TODO sample first state from the DB
+        prev_state = curr_state
+        # Initialize lists in order to store episode data
+        episode_states = []
+        episode_actions = []
+        episode_rewards = []
+        episode_next_states = []
+        episode_return_from_states = []
 
-            curr_state_l = st
-            next_state_l = s_dash
+        self.theta_threshold_radians = 12 * 2 * np.math.pi / 360
+        self.x_threshold = 2.4
 
-            if curr_state_l not in rollout_episode_states:
-                rollout_episode_states.append(curr_state_l)
-                rollout_episode_actions.append(a)
-                rollout_episode_rewards.append(r_dash)
-                rollout_episode_next_states.append(next_state_l)
-                rollout_episode_return_from_states.append(r_dash)
-                for i in range(len(rollout_episode_return_from_states) - 1):
+        for time in range(time_steps):
+            # Choose action based on current policy
+            action = self.choose_action(curr_state)
+            # Execute the action in the environment and observe reward
+            next_state = self.transition_model.predict(prev_state, curr_state, action)
+
+            done = next_state[0] < -self.x_threshold or next_state[0] > self.x_threshold or next_state[2] < -self.theta_threshold_radians or next_state[2] > self.theta_threshold_radians
+            done = bool(done)
+            reward = 1
+            if done:
+                reward = 0
+
+            #reward = self.reward_model.predict([[curr_state[0], curr_state[1], curr_state[2], curr_state[3], next_state[0], next_state[1], next_state[2], next_state[3], action]])
+            #reward = reward[0][0]
+            # should this be casted to int?
+            #done = reward == 0.0
+
+            # Update the total reward
+            total_reward += reward
+            if done or time >= self.env.spec.timestep_limit:
+                # print "Episode {} ended at step {} with total reward {}".format(episodeNumber, time, total_reward)
+                break
+
+            # Add state, action, reward transitions to containers for episode data
+            # [TODO: Store discounted return instead of just return to test]
+            curr_state_l = curr_state.tolist()
+            next_state_l = next_state.tolist()
+            if curr_state_l not in episode_states:
+                episode_states.append(curr_state_l)
+                episode_actions.append(action)
+                episode_rewards.append(reward)
+                episode_next_states.append(next_state_l)
+                episode_return_from_states.append(reward)
+                for i in range(len(episode_return_from_states) - 1):
                     # Here multiply the reward by discount factor raised to the power len(episode_return_from_states)-1-i
                     # episode_return_from_states[i] += reward
-                    rollout_episode_return_from_states[i] += pow(self.discount, len(rollout_episode_return_from_states) - 1 - i) * r_dash
+                    episode_return_from_states[i] += pow(self.discount,
+                                                         len(episode_return_from_states) - 1 - i) * reward
             else:
                 # Iterate through the replay memory and update the final return for all states, i.e don't add the
                 # state if it is already there but update reward for other states
-                for i in range(len(rollout_episode_return_from_states)):
-                    rollout_episode_return_from_states[i] += pow(self.discount,
-                                                                 len(rollout_episode_return_from_states) - i) * r_dash
+                for i in range(len(episode_return_from_states)):
+                    episode_return_from_states[i] += pow(self.discount, len(episode_return_from_states) - i) * reward
+
+            curr_state = next_state
+        if total_reward > self.max_reward_for_game:
+            self.max_reward_for_game = total_reward
 
         # # Update the global replay memory from rollout experience
         # self.update_memory(rollout_episode_states, rollout_episode_actions, rollout_episode_rewards,
         #                    rollout_episode_next_states, rollout_episode_return_from_states)
-        return rollout_episode_states, rollout_episode_actions, rollout_episode_rewards, rollout_episode_next_states, rollout_episode_return_from_states
+        self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
+                           episode_return_from_states)
+        return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
 
     def update_policy(self, advantage_vectors):
         """Updates the policy weights by running gradient descent on one state at a time"""
@@ -204,16 +232,22 @@ class Actor:
         policy = tf.nn.softmax(tf.matmul(state, weights) + biases)
         return policy
 
-    def choose_action(self, state):
+    def choose_action(self, state, explore=True):
         """Chooses action from the crrent policy and weights"""
-        if random.random() < 0.0:
+        if random.random() < 0.0 and explore:
             # Try with some epsilon greedy exploration together with the softmax action policy
             action = np.random.choice(self.env.action_space.n)
         else:
             state = np.asarray(state)
             state = state.reshape(1, len(self.observation_space.high))
             softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
+            #if explore:
+                #print "softmax random action selected..."
             action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]  # Sample action from prob density
+            #else:
+            #    print "argmax action selected..."
+                # Follow optimal policy (argmax)
+            #    action = np.argmax(softmax_out[0])  # Select argmax action from prob density (here the solution should be near optimal)
         return action
 
     def update_memory(self, episode_states, episode_actions, episode_rewards, episode_next_states,
@@ -346,7 +380,7 @@ class Critic:
 class ActorCriticLearner:
     def __init__(self, env, max_episodes, episodes_before_update, discount, w_rollouts=True, logger=True):
         self.env = env
-        self.actor = Actor(self.env, discount, learning_rate=0.001, w_rollouts=w_rollouts)
+        self.actor = Actor(self.env, discount, learning_rate=0.01, w_rollouts=w_rollouts)
         self.critic = Critic(self.env, discount)
         self.last_episode = 0
         self.logger = logger
@@ -355,16 +389,77 @@ class ActorCriticLearner:
         self.max_episodes = max_episodes
         self.episodes_before_update = episodes_before_update
 
-    def learn(self, max_env_time_steps, goal_avg_score):
+    def pre_learn(self, max_env_time_steps, goal_avg_score):
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0
         latest_rewards = []
         update = True
+
+        # Try pre-training the actor (and the critic?)
+        for i in range(0, 100):
+            self.last_episode = i
+            episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.perform_imagination_rollouts(
+                max_env_time_steps)
+            advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
+            advantage_vectors.append(advantage_vector)
+            for e in range(len(episode_states)):
+                # if episode_rewards[e] != 1.0:
+                #     print("YES:", episode_rewards[e], episode_states[e], episode_next_states[e], episode_actions[e])
+                state_action_history.append(
+                    [episode_states[e], episode_actions[e], episode_next_states[e], episode_rewards[e]])
+            latest_rewards.append(episode_total_reward)
+            if len(latest_rewards) > 100:
+                latest_rewards.pop(0)
+            sum_reward += episode_total_reward
+            if (i + 1) % self.episodes_before_update == 0:
+                avg_reward = sum_reward / self.episodes_before_update
+                if self.logger:
+                    print("Current {} episode average reward: {}".format(i, avg_reward))
+                # In this part of the code I try to reduce the effects of randomness leading to oscillations in my
+                # network by sticking to a solution if it is close to final solution.
+                # If the average reward for past batch of episodes exceeds that for solving the environment, continue with it
+                #if avg_reward >= goal_avg_score:  # This is the criteria for having solved the environment by Open-AI Gym
+                #    update = False
+                #else:
+                #    update = True
+
+                if update and sum_reward > 5:
+                    if self.logger:
+                        print("Updating")
+                    self.actor.update_policy(advantage_vectors)
+                    self.critic.update_value_estimate()
+                else:
+                    if self.logger:
+                        print("Good Solution, not updating")
+                # Delete the data collected so far
+                del advantage_vectors[:]
+                self.actor.reset_memory()
+                sum_reward = 0
+
+                avg_rew = sum(latest_rewards) / float(len(latest_rewards))
+                if self.logger:
+                    print("Episode:", i, " - AVG:", avg_rew)
+                if avg_rew >= goal_avg_score and len(latest_rewards) >= 100:
+                    if self.logger:
+                        print("Avg reward over", goal_avg_score, ":", avg_rew)
+                    break
+
+    def learn(self, max_env_time_steps, goal_avg_score):
+        self.pre_learn(max_env_time_steps, goal_avg_score)
+        self.actor.reset_memory()
+
+        state_action_history = []
+        advantage_vectors = []
+        sum_reward = 0
+        latest_rewards = []
+        update = True
+
+
         for i in range(self.max_episodes):
             self.last_episode = i
             episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.rollout_policy(
-                max_env_time_steps)
+                max_env_time_steps, update)
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
             advantage_vectors.append(advantage_vector)
             for e in range(len(episode_states)):
