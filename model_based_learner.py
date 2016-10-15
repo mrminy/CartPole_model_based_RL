@@ -5,23 +5,42 @@ import tensorflow as tf
 
 
 # from tf_transition_model import TF_Transition_model as tr_model
+def get_min_max():
+    """
+    :return: max, min from the training dataset
+    """
+    # return 2.91, -2.91
+    return 3.0, -3.0
 
 
-def preprocess_data_transition_model(data):
+def preprocess_data_transition_model(value):
     x = []
+    x_action = []
     y = []
-    for d in data:
+    x_max, x_min = get_min_max()
+    for d in value:
         for i in range(len(d)):
-            if i - 1 >= 0:
-                s = d[i - 1][0]
-            else:
-                s = [0.0, 0.0, 0.0, 0.0]
+            # if i - 1 >= 0:
+            #    s = d[i - 1][0]  # State t-1
+            # else:
+            #    s = [0.0, 0.0, 0.0, 0.0]
             sample = d[i]
-            s += sample[0]
-            s.append(sample[1])
-            x.append(s)  # State, Action
-            y.append(sample[2])  # Next state
-    return np.array(x), np.array(y)
+            # for value in sample[0]:
+            #     if value > x_max:
+            #         x_max = value
+            #     if value < x_min:
+            #         x_min = value
+            # s += sample[0]  # State t
+            # s.append(sample[1]) # Action
+            x.append(sample[0])  # State t
+            x_action.append([sample[1]])  # Action
+            y.append(sample[2])  # State t+1
+    x, x_action, y = np.array(x), np.array(x_action), np.array(y)
+
+    # Scale
+    x /= x_max
+    y /= x_max
+    return x, x_action, y
 
 
 def preprocess_data_reward_model(data):
@@ -45,7 +64,7 @@ def generate_state_representation(st0, st, a):
 def create_transition_model():
     tflearn.init_graph(seed=1234, num_cores=2, gpu_memory_fraction=0.25)
 
-    net = tflearn.input_data(shape=[None, 9])
+    net = tflearn.input_data(shape=[None, 5])
     net = tflearn.fully_connected(net, 128, activation='relu')
     net = tflearn.fully_connected(net, 128, activation='relu')
     net = tflearn.fully_connected(net, 128, activation='relu')
@@ -197,21 +216,24 @@ def create_tf_transition_model():
 
 
 class TF_Transition_model:
-    def __init__(self, restore=True):
+    def __init__(self, restore=True, save=False):
         self.graph = tf.Graph()
         if restore:
             # Loading model
-            self.y_pred, self.X, self.sess = self.tf_transition_model(train=False, save=False, restore=True)
+            self.y_pred, self.X, self.X_action, self.sess = self.tf_transition_model(train=False, save=False,
+                                                                                     restore=True)
         else:
-            # Training and saving model
-            self.y_pred, self.X, self.sess = self.tf_transition_model(train=True, save=True, restore=False)
+            # Training and possibly saving model
+            self.y_pred, self.X, self.X_action, self.sess = self.tf_transition_model(train=True, save=save,
+                                                                                     restore=False)
 
     def predict(self, prev_state, curr_state, action):
-        state_representation = [prev_state[0], prev_state[1], prev_state[2], prev_state[3], curr_state[0],
-                                curr_state[1], curr_state[2], curr_state[3], action]
+        state_representation = [curr_state[0], curr_state[1], curr_state[2], curr_state[3]]
         state_representation = np.array(state_representation)
-        transition_prediction = self.sess.run(self.y_pred, feed_dict={self.X: [state_representation]})
-        return transition_prediction[0]
+        transition_prediction = self.sess.run(self.y_pred,
+                                              feed_dict={self.X: [state_representation], self.X_action: [[action]]})
+        # Returning the predicted transition rescaled back to normal
+        return transition_prediction[0] * 2
 
     def tf_transition_model(self, train_data_path='cartpole_data/training_no_rewards.npy',
                             test_data_path='cartpole_data/testing_no_rewards.npy', train=True, save=False,
@@ -222,38 +244,43 @@ class TF_Transition_model:
             return None
 
         # Load data
+        print("Loading data...")
         training_data = np.array([])
         testing_data = np.array([])
         if train:
             training_data = np.load(train_data_path)
             testing_data = np.load(test_data_path)
-        X_train, Y_train = preprocess_data_transition_model(training_data)
-        X_test, Y_test = preprocess_data_transition_model(testing_data)
+        X_train, X_train_action, Y_train = preprocess_data_transition_model(training_data)
+        X_test, X_test_action, Y_test = preprocess_data_transition_model(testing_data)
 
         # Parameters
-        learning_rate = 0.005
-        training_epochs = 10
+        learning_rate = 0.001
+        training_epochs = 20
         batch_size = 128
         display_step = 1
         examples_to_show = 5
 
         # Network Parameters
-        n_input = 9  # Prev state, current state, action
+        n_input = 4  # Prev state
+        n_action = 1  # Action
         n_output = 4  # Predicted next state
         n_hidden_1 = 256  # 1st layer num features
         n_hidden_2 = 256  # 2nd layer num features
 
+        print("Building graph...")
         with self.graph.as_default():
 
             # tf Graph input (prev state, curr state, action taken) and output (predicted state)
             X = tf.placeholder("float", [None, n_input])
+            X_action = tf.placeholder("float", [None, n_action])
             Y = tf.placeholder("float", [None, n_output])
 
             weights = {
-                'encoder_h1': tf.Variable(tf.random_normal([n_input, n_hidden_1])),
-                'encoder_h2': tf.Variable(tf.random_normal([n_hidden_1, n_hidden_2])),
-                'decoder_h1': tf.Variable(tf.random_normal([n_hidden_2, n_hidden_1])),
-                'decoder_h2': tf.Variable(tf.random_normal([n_hidden_1, n_output])),
+                'encoder_h1': tf.Variable(tf.random_uniform([n_input, n_hidden_1], minval=-0.1, maxval=0.1)),
+                'encoder_h2': tf.Variable(tf.random_uniform([n_hidden_1, n_hidden_2], minval=-0.1, maxval=0.1)),
+                'decoder_h1': tf.Variable(
+                    tf.random_uniform([n_hidden_2 + n_action, n_hidden_1], minval=-0.1, maxval=0.1)),
+                'decoder_h2': tf.Variable(tf.random_uniform([n_hidden_1, n_output], minval=-0.1, maxval=0.1)),
             }
             biases = {
                 'encoder_b1': tf.Variable(tf.random_normal([n_hidden_1])),
@@ -271,7 +298,8 @@ class TF_Transition_model:
                 return layer_2
 
             # Building the decoder
-            def decoder(x):
+            def decoder(x, x_action):
+                x = tf.concat(1, [x, x_action])
                 layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']),
                                             biases['decoder_b1']))
                 layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['decoder_h2']),
@@ -280,7 +308,7 @@ class TF_Transition_model:
 
             # Construct model
             encoder_op = encoder(X)
-            decoder_op = decoder(encoder_op)
+            decoder_op = decoder(encoder_op, X_action)
 
             # Prediction
             y_pred = decoder_op
@@ -301,18 +329,22 @@ class TF_Transition_model:
         sess = tf.Session(graph=self.graph)
         sess.run(init)
         total_batch = int(len(X_train) / batch_size)
+        print("Starting training...")
         print("Total nr of batches:", total_batch)
         if train:
             # Training cycle
             for epoch in range(training_epochs):
                 # Loop over all batches
                 c = None
+                idexes = np.arange(len(X_train))
                 for i in range(total_batch):
-                    idx = np.random.choice(np.arange(len(X_train)), 1000, replace=False)
+                    idx = np.random.choice(idexes, batch_size, replace=True)
                     batch_xs = X_train[idx]
+                    batch_x_action = X_train_action[idx]
                     batch_ys = Y_train[idx]
                     # Run optimization op (backprop) and cost op (to get loss value)
-                    _, c = sess.run([optimizer, loss_function], feed_dict={X: batch_xs, Y: batch_ys})
+                    _, c = sess.run([optimizer, loss_function],
+                                    feed_dict={X: batch_xs, X_action: batch_x_action, Y: batch_ys})
                 # Display logs per epoch step
                 if epoch % display_step == 0 and c is not None:
                     print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c))
@@ -329,25 +361,26 @@ class TF_Transition_model:
 
         if train:
             # Applying encode and decode over test set
-            encode_decode = sess.run(y_pred, feed_dict={X: X_test[:examples_to_show]})
+            encode_decode = sess.run(y_pred, feed_dict={X: X_test[:examples_to_show],
+                                                        X_action: X_test_action[:examples_to_show]})
             print(Y_test[:examples_to_show])
             print(encode_decode)
 
-        return y_pred, X, sess
+        return y_pred, X, X_action, sess
 
 
 if __name__ == '__main__':
     # train_transition_model()
     # train_reward_model(save=False)
     # gather_reward_data(20000)
-    env = gym.make('CartPole-v0')
-    prev_state = env.reset()
-    action = np.random.choice(env.action_space.n)
-    curr_state, reward, done, info = env.step(action)
-    action = np.random.choice(env.action_space.n)
-    real_next_state, reward, done, info = env.step(action)
+    # env = gym.make('CartPole-v0')
+    # prev_state = env.reset()
+    # action = np.random.choice(env.action_space.n)
+    # curr_state, reward, done, info = env.step(action)
+    # action = np.random.choice(env.action_space.n)
+    # real_next_state, reward, done, info = env.step(action)
+    model = TF_Transition_model(restore=False, save=True)
+    # model.tf_transition_model()
 
-    model = TF_Transition_model(restore=True)
-
-    print("Real observation:", real_next_state)
-    print("Predicted observation:", model.predict(prev_state, curr_state, action))
+    # print("Real observation:", real_next_state)
+    # print("Predicted observation:", model.predict(prev_state, curr_state, action))

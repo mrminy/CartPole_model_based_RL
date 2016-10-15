@@ -18,15 +18,17 @@ replay_next_states = []
 replay_return_from_states = []
 
 # Load reward model once
-print("Generating reward model...")
-reward_model = model_based_learner.create_reward_model()
-print("Loading reward model...")
-reward_model.load('reward_model/cart_pole_reward_model.tflearn')
-#reward_model = None
+# print("Generating reward model...")
+# reward_model = model_based_learner.create_reward_model()
+# print("Loading reward model...")
+# reward_model.load('reward_model/cart_pole_reward_model.tflearn')
+reward_model = None
 
 # Load transition_model once
 print("Loading transition model...")
 transition_model = model_based_learner.TF_Transition_model()
+
+
 # transition_model.load('transition_model/cart_pole_transition_model.tflearn', weights_only=True)
 
 class Actor:
@@ -109,9 +111,7 @@ class Actor:
                 episode_return_from_states.append(reward)
                 for i in range(len(episode_return_from_states) - 1):
                     # Here multiply the reward by discount factor raised to the power len(episode_return_from_states)-1-i
-                    # episode_return_from_states[i] += reward
-                    episode_return_from_states[i] += pow(self.discount,
-                                                         len(episode_return_from_states) - 1 - i) * reward
+                    episode_return_from_states[i] += pow(self.discount, len(episode_return_from_states) - 1 - i) * reward
             else:
                 # Iterate through the replay memory and update the final return for all states, i.e don't add the
                 # state if it is already there but update reward for other states
@@ -122,15 +122,15 @@ class Actor:
         if total_reward > self.max_reward_for_game:
             self.max_reward_for_game = total_reward
 
-        #if self.w_rollouts:
+        # if self.w_rollouts:
         #    # Make imagination rollouts from model to gain even more experience from a random action policy
         #    rollout_episode_states, rollout_episode_actions, rollout_episode_rewards, rollout_episode_next_states, rollout_episode_return_from_states = self.perform_imagination_rollouts(
         #        episode_states, episode_next_states[-1])
-        #    episode_states = rollout_episode_states
-        #    episode_actions = rollout_episode_actions
-        #    episode_rewards = rollout_episode_rewards
-        #    episode_next_states = rollout_episode_next_states
-        #    episode_return_from_states = rollout_episode_return_from_states
+        #    episode_states += rollout_episode_states
+        #    episode_actions += rollout_episode_actions
+        #    episode_rewards += rollout_episode_rewards
+        #    episode_next_states += rollout_episode_next_states
+        #    episode_return_from_states += rollout_episode_return_from_states
 
         # Update the global replay memory
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
@@ -140,7 +140,7 @@ class Actor:
     def perform_imagination_rollouts(self, time_steps):
         """Rollout policy for one episode, update the replay memory and return total reward"""
         total_reward = 0
-        curr_state = self.env.reset() # TODO sample first state from the DB
+        curr_state = self.env.reset()  # TODO sample first state from the DB
         prev_state = curr_state
         # Initialize lists in order to store episode data
         episode_states = []
@@ -158,16 +158,20 @@ class Actor:
             # Execute the action in the environment and observe reward
             next_state = self.transition_model.predict(prev_state, curr_state, action)
 
-            done = next_state[0] < -self.x_threshold or next_state[0] > self.x_threshold or next_state[2] < -self.theta_threshold_radians or next_state[2] > self.theta_threshold_radians
+            # Checking if game is over
+            done = next_state[0] < -self.x_threshold or next_state[0] > self.x_threshold or next_state[
+                                                                                                2] < -self.theta_threshold_radians or \
+                   next_state[2] > self.theta_threshold_radians
             done = bool(done)
+            # Give reward of 1 if game is not over
             reward = 1
             if done:
                 reward = 0
 
-            #reward = self.reward_model.predict([[curr_state[0], curr_state[1], curr_state[2], curr_state[3], next_state[0], next_state[1], next_state[2], next_state[3], action]])
-            #reward = reward[0][0]
+            # reward = self.reward_model.predict([[curr_state[0], curr_state[1], curr_state[2], curr_state[3], next_state[0], next_state[1], next_state[2], next_state[3], action]])
+            # reward = reward[0][0]
             # should this be casted to int?
-            #done = reward == 0.0
+            # done = reward == 0.0
 
             # Update the total reward
             total_reward += reward
@@ -195,7 +199,6 @@ class Actor:
                 # state if it is already there but update reward for other states
                 for i in range(len(episode_return_from_states)):
                     episode_return_from_states[i] += pow(self.discount, len(episode_return_from_states) - i) * reward
-
             curr_state = next_state
         if total_reward > self.max_reward_for_game:
             self.max_reward_for_game = total_reward
@@ -241,13 +244,12 @@ class Actor:
             state = np.asarray(state)
             state = state.reshape(1, len(self.observation_space.high))
             softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
-            #if explore:
-                #print "softmax random action selected..."
-            action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]  # Sample action from prob density
-            #else:
-            #    print "argmax action selected..."
+            if explore:
+                # Sample action from prob density
+                action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
+            else:
                 # Follow optimal policy (argmax)
-            #    action = np.argmax(softmax_out[0])  # Select argmax action from prob density (here the solution should be near optimal)
+                action = np.argmax(softmax_out[0])
         return action
 
     def update_memory(self, episode_states, episode_actions, episode_rewards, episode_next_states,
@@ -378,12 +380,14 @@ class Critic:
 
 
 class ActorCriticLearner:
-    def __init__(self, env, max_episodes, episodes_before_update, discount, w_rollouts=True, logger=True):
+    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100, w_rollouts=True,
+                 logger=True):
         self.env = env
         self.actor = Actor(self.env, discount, learning_rate=0.01, w_rollouts=w_rollouts)
         self.critic = Critic(self.env, discount)
         self.last_episode = 0
         self.logger = logger
+        self.n_pre_training_epochs = n_pre_training_epochs
 
         # Learner parameters
         self.max_episodes = max_episodes
@@ -395,9 +399,10 @@ class ActorCriticLearner:
         sum_reward = 0
         latest_rewards = []
         update = True
+        self.actor.learning_rate = 0.01
 
         # Try pre-training the actor (and the critic?)
-        for i in range(0, 100):
+        for i in range(0, self.n_pre_training_epochs):
             self.last_episode = i
             episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.perform_imagination_rollouts(
                 max_env_time_steps)
@@ -419,12 +424,12 @@ class ActorCriticLearner:
                 # In this part of the code I try to reduce the effects of randomness leading to oscillations in my
                 # network by sticking to a solution if it is close to final solution.
                 # If the average reward for past batch of episodes exceeds that for solving the environment, continue with it
-                #if avg_reward >= goal_avg_score:  # This is the criteria for having solved the environment by Open-AI Gym
-                #    update = False
-                #else:
-                #    update = True
+                if avg_reward >= goal_avg_score:  # This is the criteria for having solved the environment by Open-AI Gym
+                   update = False
+                else:
+                   update = True
 
-                if update and sum_reward > 5:
+                if update and sum_reward > 2:
                     if self.logger:
                         print("Updating")
                     self.actor.update_policy(advantage_vectors)
@@ -439,7 +444,7 @@ class ActorCriticLearner:
 
                 avg_rew = sum(latest_rewards) / float(len(latest_rewards))
                 if self.logger:
-                    print("Episode:", i, " - AVG:", avg_rew)
+                    print("Pretraining episode:", i, " - AVG:", avg_rew)
                 if avg_rew >= goal_avg_score and len(latest_rewards) >= 100:
                     if self.logger:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
@@ -449,12 +454,12 @@ class ActorCriticLearner:
         self.pre_learn(max_env_time_steps, goal_avg_score)
         self.actor.reset_memory()
 
+        self.actor.learning_rate = 0.01
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0
         latest_rewards = []
         update = True
-
 
         for i in range(self.max_episodes):
             self.last_episode = i
@@ -465,7 +470,8 @@ class ActorCriticLearner:
             for e in range(len(episode_states)):
                 # if episode_rewards[e] != 1.0:
                 #     print("YES:", episode_rewards[e], episode_states[e], episode_next_states[e], episode_actions[e])
-                state_action_history.append([episode_states[e], episode_actions[e], episode_next_states[e], episode_rewards[e]])
+                state_action_history.append(
+                    [episode_states[e], episode_actions[e], episode_next_states[e], episode_rewards[e]])
             latest_rewards.append(episode_total_reward)
             if len(latest_rewards) > 100:
                 latest_rewards.pop(0)
