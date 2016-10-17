@@ -36,7 +36,7 @@ def main():
         episodes_before_update = 2
         discount = 0.85
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs,
-                                        n_rollout_epochs, logger=True, w_rollouts=w_rollouts)
+                                        n_rollout_epochs, logger=True)
         full_state_action_history.append(ac_learner.learn(200, 195))
         end_episode.append(ac_learner.last_episode)
         env.monitor.close()

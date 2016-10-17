@@ -7,8 +7,6 @@ import random
 
 import numpy as np
 import tensorflow as tf
-import tflearn
-
 import model_based_learner
 
 replay_states = []
@@ -17,22 +15,9 @@ replay_rewards = []
 replay_next_states = []
 replay_return_from_states = []
 
-# Load reward model once
-# print("Generating reward model...")
-# reward_model = model_based_learner.create_reward_model()
-# print("Loading reward model...")
-# reward_model.load('reward_model/cart_pole_reward_model.tflearn')
-reward_model = None
-
-# Load transition_model once
-print("Loading transition model...")
-transition_model = model_based_learner.TF_Transition_model()
-
-
-# transition_model.load('transition_model/cart_pole_transition_model.tflearn', weights_only=True)
 
 class Actor:
-    def __init__(self, env, discount=0.90, learning_rate=0.01, w_rollouts=True):
+    def __init__(self, env, transition_model, discount=0.90, learning_rate=0.01):
         self.env = env
         self.observation_space = env.observation_space
         self.action_space = env.action_space
@@ -44,9 +29,8 @@ class Actor:
         # Declare tf graph
         self.graph = tf.Graph()
 
-        self.w_rollouts = w_rollouts
         self.transition_model = transition_model
-        self.reward_model = reward_model
+        # self.reward_model = reward_model # TODO
 
         # Build the graph when instantiated
         with self.graph.as_default():
@@ -121,16 +105,6 @@ class Actor:
             curr_state = next_state
         if total_reward > self.max_reward_for_game:
             self.max_reward_for_game = total_reward
-
-        # if self.w_rollouts:
-        #    # Make imagination rollouts from model to gain even more experience from a random action policy
-        #    rollout_episode_states, rollout_episode_actions, rollout_episode_rewards, rollout_episode_next_states, rollout_episode_return_from_states = self.perform_imagination_rollouts(
-        #        episode_states, episode_next_states[-1])
-        #    episode_states += rollout_episode_states
-        #    episode_actions += rollout_episode_actions
-        #    episode_rewards += rollout_episode_rewards
-        #    episode_next_states += rollout_episode_next_states
-        #    episode_return_from_states += rollout_episode_return_from_states
 
         # Update the global replay memory
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
@@ -380,10 +354,11 @@ class Critic:
 
 
 class ActorCriticLearner:
-    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100, n_rollout_epochs=5, w_rollouts=True,
+    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100, n_rollout_epochs=5,
                  logger=True):
         self.env = env
-        self.actor = Actor(self.env, discount, learning_rate=0.01, w_rollouts=w_rollouts)
+        self.transition_model = model_based_learner.TF_Transition_model(env).restore_model()
+        self.actor = Actor(self.env, self.transition_model, discount, learning_rate=0.01)
         self.critic = Critic(self.env, discount)
         self.last_episode = 0
         self.logger = logger
