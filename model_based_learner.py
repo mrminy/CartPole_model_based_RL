@@ -9,8 +9,10 @@ def get_min_max():
     """
     :return: max, min from the training dataset
     """
-    # return 2.91, -2.91
-    return 3.0, -3.0
+    # x_max = [2.3817147442718847, 2.9103841971082174, 0.20939462615293689, 2.6612303605854293]
+    x_max = [2.5, 3.0, 0.25, 2.75]
+    x_min = [-2.391525269742431, -2.8946690139833624, -0.20933102768952855, -2.9099185565733316]
+    return x_max, x_min
 
 
 def preprocess_data_transition_model(value):
@@ -25,21 +27,13 @@ def preprocess_data_transition_model(value):
             # else:
             #    s = [0.0, 0.0, 0.0, 0.0]
             sample = d[i]
-            # for value in sample[0]:
-            #     if value > x_max:
-            #         x_max = value
-            #     if value < x_min:
-            #         x_min = value
+
             # s += sample[0]  # State t
             # s.append(sample[1]) # Action
-            x.append(sample[0])  # State t
+            x.append(np.array(sample[0]) / x_max)  # State t (and scale)
             x_action.append([sample[1]])  # Action
-            y.append(sample[2])  # State t+1
+            y.append(np.array(sample[2]) / x_max)  # State t+1 (and scale)
     x, x_action, y = np.array(x), np.array(x_action), np.array(y)
-
-    # Scale
-    x /= x_max
-    y /= x_max
     return x, x_action, y
 
 
@@ -233,7 +227,7 @@ class TF_Transition_model:
         transition_prediction = self.sess.run(self.y_pred,
                                               feed_dict={self.X: [state_representation], self.X_action: [[action]]})
         # Returning the predicted transition rescaled back to normal
-        return transition_prediction[0] * 2
+        return transition_prediction[0] * get_min_max()[0]
 
     def tf_transition_model(self, train_data_path='cartpole_data/training_no_rewards.npy',
                             test_data_path='cartpole_data/testing_no_rewards.npy', train=True, save=False,
@@ -266,25 +260,35 @@ class TF_Transition_model:
         n_output = 4  # Predicted next state
         n_hidden_1 = 256  # 1st layer num features
         n_hidden_2 = 256  # 2nd layer num features
+        n_hidden_transition = 128  # Transition prediction layer
+
+        w_init_limit = (-0.1, 0.1)
 
         print("Building graph...")
         with self.graph.as_default():
 
-            # tf Graph input (prev state, curr state, action taken) and output (predicted state)
+            # Encode curr_state, add transition prediction with selected action and decode to predicted output state
             X = tf.placeholder("float", [None, n_input])
             X_action = tf.placeholder("float", [None, n_action])
             Y = tf.placeholder("float", [None, n_output])
 
             weights = {
-                'encoder_h1': tf.Variable(tf.random_uniform([n_input, n_hidden_1], minval=-0.1, maxval=0.1)),
-                'encoder_h2': tf.Variable(tf.random_uniform([n_hidden_1, n_hidden_2], minval=-0.1, maxval=0.1)),
-                'decoder_h1': tf.Variable(
-                    tf.random_uniform([n_hidden_2 + n_action, n_hidden_1], minval=-0.1, maxval=0.1)),
-                'decoder_h2': tf.Variable(tf.random_uniform([n_hidden_1, n_output], minval=-0.1, maxval=0.1)),
+                'encoder_h1': tf.Variable(
+                    tf.random_uniform([n_input, n_hidden_1], minval=w_init_limit[0], maxval=w_init_limit[1])),
+                'encoder_h2': tf.Variable(
+                    tf.random_uniform([n_hidden_1, n_hidden_2], minval=w_init_limit[0], maxval=w_init_limit[1])),
+                'transition_h1': tf.Variable(
+                    tf.random_uniform([n_hidden_2 + n_action, n_hidden_transition], minval=w_init_limit[0],
+                                      maxval=w_init_limit[1])),
+                'decoder_h1': tf.Variable(tf.random_uniform([n_hidden_transition, n_hidden_1], minval=w_init_limit[0],
+                                                            maxval=w_init_limit[1])),
+                'decoder_h2': tf.Variable(
+                    tf.random_uniform([n_hidden_1, n_output], minval=w_init_limit[0], maxval=w_init_limit[1])),
             }
             biases = {
                 'encoder_b1': tf.Variable(tf.random_normal([n_hidden_1])),
                 'encoder_b2': tf.Variable(tf.random_normal([n_hidden_2])),
+                'transition_b1': tf.Variable(tf.random_normal([n_hidden_transition])),
                 'decoder_b1': tf.Variable(tf.random_normal([n_hidden_1])),
                 'decoder_b2': tf.Variable(tf.random_normal([n_output])),
             }
@@ -297,9 +301,15 @@ class TF_Transition_model:
                                             biases['encoder_b2']))
                 return layer_2
 
-            # Building the decoder
-            def decoder(x, x_action):
+            # Building the transition network between the encoder and decoder
+            def transition(x, x_action):
                 x = tf.concat(1, [x, x_action])
+                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['transition_h1']),
+                                            biases['transition_b1']))
+                return layer_1
+
+            # Building the decoder
+            def decoder(x):
                 layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']),
                                             biases['decoder_b1']))
                 layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['decoder_h2']),
@@ -308,7 +318,8 @@ class TF_Transition_model:
 
             # Construct model
             encoder_op = encoder(X)
-            decoder_op = decoder(encoder_op, X_action)
+            transition_pred = transition(encoder_op, X_action)
+            decoder_op = decoder(transition_pred)
 
             # Prediction
             y_pred = decoder_op

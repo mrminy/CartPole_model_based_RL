@@ -14,15 +14,17 @@ import gym
 import numpy as np
 from my_actor_critic import ActorCriticLearner
 
+
 def main():
     save_history = False
     w_rollouts = False
     w_game_gui = False
-    n_pre_training_epochs = 100
-    n_epochs = 50
+    n_pre_training_epochs = 250
+    n_rollout_epochs = 50
+    n_agents = 3  # Train n different agents
     full_state_action_history = []
     end_episode = []
-    for i in range(n_epochs):
+    for i in range(n_agents):
         print("Starting game nr:", i)
         env = gym.make('CartPole-v0')
         # env.seed(1234)
@@ -33,7 +35,8 @@ def main():
         max_episodes = 1000
         episodes_before_update = 2
         discount = 0.85
-        ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs, logger=True, w_rollouts=w_rollouts)
+        ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs,
+                                        n_rollout_epochs, logger=True, w_rollouts=w_rollouts)
         full_state_action_history.append(ac_learner.learn(200, 195))
         end_episode.append(ac_learner.last_episode)
         env.monitor.close()

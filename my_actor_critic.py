@@ -380,7 +380,7 @@ class Critic:
 
 
 class ActorCriticLearner:
-    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100, w_rollouts=True,
+    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100, n_rollout_epochs=5, w_rollouts=True,
                  logger=True):
         self.env = env
         self.actor = Actor(self.env, discount, learning_rate=0.01, w_rollouts=w_rollouts)
@@ -388,22 +388,23 @@ class ActorCriticLearner:
         self.last_episode = 0
         self.logger = logger
         self.n_pre_training_epochs = n_pre_training_epochs
+        self.n_rollout_epochs = n_rollout_epochs
 
         # Learner parameters
         self.max_episodes = max_episodes
         self.episodes_before_update = episodes_before_update
 
-    def pre_learn(self, max_env_time_steps, goal_avg_score):
+    def pre_learn(self, max_env_time_steps, goal_avg_score, n_epochs=1, logger=True):
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0
         latest_rewards = []
         update = True
-        self.actor.learning_rate = 0.01
+        old_lr = self.actor.learning_rate
+        self.actor.learning_rate = 0.001
 
         # Try pre-training the actor (and the critic?)
-        for i in range(0, self.n_pre_training_epochs):
-            self.last_episode = i
+        for i in range(0, n_epochs):
             episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.perform_imagination_rollouts(
                 max_env_time_steps)
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
@@ -419,7 +420,7 @@ class ActorCriticLearner:
             sum_reward += episode_total_reward
             if (i + 1) % self.episodes_before_update == 0:
                 avg_reward = sum_reward / self.episodes_before_update
-                if self.logger:
+                if logger:
                     print("Current {} episode average reward: {}".format(i, avg_reward))
                 # In this part of the code I try to reduce the effects of randomness leading to oscillations in my
                 # network by sticking to a solution if it is close to final solution.
@@ -430,12 +431,12 @@ class ActorCriticLearner:
                    update = True
 
                 if update and sum_reward > 2:
-                    if self.logger:
+                    if logger:
                         print("Updating")
                     self.actor.update_policy(advantage_vectors)
                     self.critic.update_value_estimate()
                 else:
-                    if self.logger:
+                    if logger:
                         print("Good Solution, not updating")
                 # Delete the data collected so far
                 del advantage_vectors[:]
@@ -443,16 +444,17 @@ class ActorCriticLearner:
                 sum_reward = 0
 
                 avg_rew = sum(latest_rewards) / float(len(latest_rewards))
-                if self.logger:
+                if logger:
                     print("Pretraining episode:", i, " - AVG:", avg_rew)
                 if avg_rew >= goal_avg_score and len(latest_rewards) >= 100:
-                    if self.logger:
+                    if logger:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
                     break
+        self.actor.learning_rate = old_lr
 
     def learn(self, max_env_time_steps, goal_avg_score):
-        self.pre_learn(max_env_time_steps, goal_avg_score)
-        self.actor.reset_memory()
+        # Pre-training
+        self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_pre_training_epochs)
 
         self.actor.learning_rate = 0.01
         state_action_history = []
@@ -508,4 +510,7 @@ class ActorCriticLearner:
                     if self.logger:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
                     break
+
+                # Trying with imagination rollouts for each episode
+                self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)
         return state_action_history
