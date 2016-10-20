@@ -9,12 +9,6 @@ import numpy as np
 import tensorflow as tf
 import model_based_learner
 
-replay_states = []
-replay_actions = []
-replay_rewards = []
-replay_next_states = []
-replay_return_from_states = []
-
 
 class Actor:
     def __init__(self, env, transition_model, discount=0.90, learning_rate=0.01):
@@ -24,6 +18,7 @@ class Actor:
         self.action_space_n = self.action_space.n
         # Learning parameters
         self.learning_rate = learning_rate
+        self.imagination_learning_rate = learning_rate
         self.discount = discount
         self.max_reward_for_game = -99999999.99
         # Declare tf graph
@@ -95,7 +90,8 @@ class Actor:
                 episode_return_from_states.append(reward)
                 for i in range(len(episode_return_from_states) - 1):
                     # Here multiply the reward by discount factor raised to the power len(episode_return_from_states)-1-i
-                    episode_return_from_states[i] += pow(self.discount, len(episode_return_from_states) - 1 - i) * reward
+                    episode_return_from_states[i] += pow(self.discount,
+                                                         len(episode_return_from_states) - 1 - i) * reward
             else:
                 # Iterate through the replay memory and update the final return for all states, i.e don't add the
                 # state if it is already there but update reward for other states
@@ -111,10 +107,10 @@ class Actor:
                            episode_return_from_states)
         return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
 
-    def perform_imagination_rollouts(self, time_steps):
+    def perform_imagination_rollouts(self, time_steps, start_state):
         """Rollout policy for one episode, update the replay memory and return total reward"""
         total_reward = 0
-        curr_state = self.env.reset()  # TODO sample first state from the DB
+        curr_state = start_state #self.env.reset()  # TODO sample first state from the DB?
         prev_state = curr_state
         # Initialize lists in order to store episode data
         episode_states = []
@@ -123,6 +119,7 @@ class Actor:
         episode_next_states = []
         episode_return_from_states = []
 
+        # True reward function TODO fix this into a reward function approximator?
         self.theta_threshold_radians = 12 * 2 * np.math.pi / 360
         self.x_threshold = 2.4
 
@@ -130,7 +127,7 @@ class Actor:
             # Choose action based on current policy
             action = self.choose_action(curr_state)
             # Execute the action in the environment and observe reward
-            next_state = self.transition_model.predict(prev_state, curr_state, action)
+            next_state = self.transition_model.predict(curr_state, action)
 
             # Checking if game is over
             done = next_state[0] < -self.x_threshold or next_state[0] > self.x_threshold or next_state[
@@ -141,11 +138,6 @@ class Actor:
             reward = 1
             if done:
                 reward = 0
-
-            # reward = self.reward_model.predict([[curr_state[0], curr_state[1], curr_state[2], curr_state[3], next_state[0], next_state[1], next_state[2], next_state[3], action]])
-            # reward = reward[0][0]
-            # should this be casted to int?
-            # done = reward == 0.0
 
             # Update the total reward
             total_reward += reward
@@ -354,10 +346,12 @@ class Critic:
 
 
 class ActorCriticLearner:
-    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100, n_rollout_epochs=5,
-                 logger=True):
+    def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100,
+                 n_rollout_epochs=5,
+                 logger=True, transition_model_restore_path='transition_model/tf_transition_model.ckpt'):
         self.env = env
-        self.transition_model = model_based_learner.TF_Transition_model(env).restore_model()
+        self.transition_model = model_based_learner.TF_Transition_model(env)
+        self.transition_model.restore_model(restore_path=transition_model_restore_path)
         self.actor = Actor(self.env, self.transition_model, discount, learning_rate=0.01)
         self.critic = Critic(self.env, discount)
         self.last_episode = 0
@@ -369,6 +363,13 @@ class ActorCriticLearner:
         self.max_episodes = max_episodes
         self.episodes_before_update = episodes_before_update
 
+        global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states
+        replay_states = []
+        replay_actions = []
+        replay_rewards = []
+        replay_next_states = []
+        replay_return_from_states = []
+
     def pre_learn(self, max_env_time_steps, goal_avg_score, n_epochs=1, logger=True):
         state_action_history = []
         advantage_vectors = []
@@ -376,12 +377,11 @@ class ActorCriticLearner:
         latest_rewards = []
         update = True
         old_lr = self.actor.learning_rate
-        self.actor.learning_rate = 0.001
+        self.actor.learning_rate = self.actor.imagination_learning_rate
 
-        # Try pre-training the actor (and the critic?)
         for i in range(0, n_epochs):
             episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.perform_imagination_rollouts(
-                max_env_time_steps)
+                max_env_time_steps, self.env.reset())
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
             advantage_vectors.append(advantage_vector)
             for e in range(len(episode_states)):
@@ -401,9 +401,9 @@ class ActorCriticLearner:
                 # network by sticking to a solution if it is close to final solution.
                 # If the average reward for past batch of episodes exceeds that for solving the environment, continue with it
                 if avg_reward >= goal_avg_score:  # This is the criteria for having solved the environment by Open-AI Gym
-                   update = False
+                    update = False
                 else:
-                   update = True
+                    update = True
 
                 if update and sum_reward > 2:
                     if logger:
@@ -427,11 +427,12 @@ class ActorCriticLearner:
                     break
         self.actor.learning_rate = old_lr
 
-    def learn(self, max_env_time_steps, goal_avg_score):
+    def learn(self, max_env_time_steps, goal_avg_score, learning_rate=0.01, imagination_learning_rate=0.0001):
+        self.actor.imagination_learning_rate = imagination_learning_rate
+        self.actor.learning_rate = learning_rate
         # Pre-training
         self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_pre_training_epochs)
 
-        self.actor.learning_rate = 0.01
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0

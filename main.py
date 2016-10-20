@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Script to solve cartpole control problem using policy gradient with neural network
 	function approximation
 	Polcy used is softmax
@@ -19,9 +18,11 @@ def main():
     save_history = False
     w_rollouts = False
     w_game_gui = False
-    n_pre_training_epochs = 250
-    n_rollout_epochs = 50
-    n_agents = 3  # Train n different agents
+    n_pre_training_epochs = 200
+    n_rollout_epochs = 0
+    n_agents = 100  # Train n different agents
+    learning_rate = 0.01
+    pre_training_learning_rate = 0.001
     full_state_action_history = []
     end_episode = []
     for i in range(n_agents):
@@ -36,8 +37,10 @@ def main():
         episodes_before_update = 2
         discount = 0.85
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs,
-                                        n_rollout_epochs, logger=True)
-        full_state_action_history.append(ac_learner.learn(200, 195))
+                                        n_rollout_epochs, logger=True,
+                                        transition_model_restore_path='new_transition_model/random_agent/transition_model.ckpt')
+        full_state_action_history.append(ac_learner.learn(200, 195, learning_rate=learning_rate,
+                                                          imagination_learning_rate=pre_training_learning_rate))
         end_episode.append(ac_learner.last_episode)
         env.monitor.close()
     print("Done simulating...")

@@ -16,7 +16,7 @@ def gather_data_random_agent(n_games, max_time_steps, env, save_path="cartpole_d
             next_state, reward, done, info = env.step(action)
             if done:
                 reward = 0.0
-            data.append(np.array([[curr_state, action, next_state, reward]]))
+            data.append(np.array([curr_state, action, next_state, reward]))
             curr_state = next_state
             if done:
                 break
@@ -50,11 +50,15 @@ def gather_data_actor_critic(n_agents, max_episodes, max_time_steps, env, save_p
 if __name__ == '__main__':
     start_time = time.time()
     env = gym.make('CartPole-v0')
-    # d = gather_data_random_agent(50000, 200, env,
-    #                              save_path="cartpole_data/random_agent_testing_data.npy",
-    #                              save_data=False)
 
-    d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data/actor_critic_testing_data.npy",
+    # Random agent sampling
+    d = gather_data_random_agent(55000, 200, env,
+                                 save_path="cartpole_data/random_agent_testing_data.npy",
                                  save_data=True)
+
+    # Actor critic sampling
+    # d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data/actor_critic_testing_data.npy",
+    #                              save_data=True)
+
     print("Number of steps:", len(d))
     print("Done:", time.time() - start_time)
