@@ -48,3 +48,22 @@ Std: 13.7258879494
 [260, 383, 310, 243, 290, 283, 375, 283, 305, 194] - pre-training 200 games with 10000 steps (30 epochs) model
 Avg: 292.6
 Std: 53.7162917559
+
+
+H = 200
+H2 = 200
+batch_number = 500
+gamma = 0.99
+num_between_q_copies = 150
+explore_decay = 0.9995  # Exploration decay per step
+min_explore = 0.01
+max_steps = 200
+reward_goal = 195
+memory_size = 100000
+learning_rate = 0.001
+Pre-training 200 (only exploring), imagination rollouts (only exploring), no exploration in real life
+Full data set:
+[99, 99, 99, 99, 99, 99, 99, 99, 99, 99]
+Avg: 99.0
+Std: 0.0
+
