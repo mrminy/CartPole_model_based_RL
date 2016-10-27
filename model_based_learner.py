@@ -40,9 +40,9 @@ class TF_Transition_model:
         self.n_input = self.env.observation_space.shape[0]  # Prev state
         self.n_action = 1  # Action # TODO add support for changing action space self.env.action_space.n (for now --> binary)
         self.n_output = self.n_input  # Predicted next state
-        self.n_hidden_1 = 64  # 1st layer num features
-        self.n_hidden_2 = 64  # 2nd layer num features
-        self.n_hidden_transition = 128  # Transition prediction layer
+        self.n_hidden_1 = 20  # 1st layer num features
+        self.n_hidden_2 = 20  # 2nd layer num features
+        self.n_hidden_transition = 40  # Transition prediction layer
 
         self.cost_history = []
         self.test_acc_history = []
@@ -210,7 +210,7 @@ class TF_Transition_model:
                 # Run optimization op (backprop) and cost op (to get loss value)
                 _, c = self.sess.run([self.optimizer, self.loss_function],
                                      feed_dict={self.X: batch_xs, self.X_action: batch_x_action, self.Y: batch_ys,
-                                                self.keep_prob: 0.85})
+                                                self.keep_prob: 1.0})
                 if i % self.history_sampling_rate == 0:
                     self.cost_history.append(c)
                     sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
@@ -309,6 +309,6 @@ if __name__ == '__main__':
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
 
     # Current best is no dropout, not regularization, no scaling in loss-function
-    model.train(training_epochs=1000,
-                train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
+    model.train(training_epochs=300, learning_rate=0.0005,
+                train_data_path='cartpole_data/random_agent/training_data.npy', save=True,
                 save_path="new_transition_model/transition_model.ckpt")
