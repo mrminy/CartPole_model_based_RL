@@ -1,0 +1,29 @@
+import numpy as np
+import gym
+
+results = []
+env = gym.make('CartPole-v0')
+for i in range(10000):
+    env.reset()
+    last_step = 0
+    for time_step in range(200):
+        exec_action = np.random.choice(env.action_space.n)
+        next_state, reward, done, info = env.step(exec_action)
+        last_step += 1
+
+        if done:
+            break
+    results.append(last_step)
+
+print(results)
+
+
+"""
+Random agent simulated 1000 games:
+AVG:    22.398
+STDEV:  11.973
+MIN:    8
+MAX:    96
+
+MAX (1000000): 189
+"""

@@ -1,23 +1,30 @@
 """
-This actor-critic agent is a modification from mohakbhardwaj's version. This is now a model-based implementation instead
-of a model-free. The transition model is pre-learned by gathered data and supervised learning. See model_based_learner.py
+This is an actor-critic implementation to experiment with model-based RL.
+The code is a modification from mohakbhardwaj's version on gym.openai.com.
+The transition model is pre-learned by gathered data and supervised learning. See model_based_learner.py
 Link: https://gym.openai.com/evaluations/eval_KhmXmmgmSManWEtxZJoLeg
+Github: https://gist.github.com/mohakbhardwaj/3d895b41efbceff93874228cc0f39132#file-cartpole-policy-gradient-py
 """
-import random
 
+import random
 import numpy as np
 import tensorflow as tf
+
+import common
 import model_based_learner
 
 
 class Actor:
-    def __init__(self, env, transition_model, discount=0.90, learning_rate=0.01):
+    def __init__(self, env, transition_model, imagination_rollouts=0, action_uncertainty=0.0, discount=0.90,
+                 learning_rate=0.01):
         self.env = env
         self.observation_space = env.observation_space
         self.action_space = env.action_space
         self.action_space_n = self.action_space.n
+        self.action_uncertainty = action_uncertainty
         # Learning parameters
         self.learning_rate = learning_rate
+        self.imagination_rollouts = imagination_rollouts
         self.imagination_learning_rate = learning_rate
         self.discount = discount
         self.max_reward_for_game = -99999999.99
@@ -68,23 +75,25 @@ class Actor:
         episode_return_from_states = []
 
         for time in range(timeSteps):
-            # Choose action based on current policy
-            action = self.choose_action(curr_state, explore)
-            # Execute the action in the environment and observe reward
-            next_state, reward, done, info = self.env.step(action)
+            # Choose selected_action based on current policy
+            selected_action, executed_action = self.choose_action(curr_state, explore)
+
+            # Execute the selected_action in the environment and observe reward
+            next_state, reward, done, info = self.env.step(executed_action)
             # Update the total reward
             total_reward += reward
+
             if done or time >= self.env.spec.timestep_limit:
-                # print "Episode {} ended at step {} with total reward {}".format(episodeNumber, time, total_reward)
+                # Skip training when done or time-step is above the limit of the env
                 break
 
-            # Add state, action, reward transitions to containers for episode data
+            # Add state, selected_action, reward transitions to containers for episode data
             # [TODO: Store discounted return instead of just return to test]
             curr_state_l = curr_state.tolist()
             next_state_l = next_state.tolist()
             if curr_state_l not in episode_states:
                 episode_states.append(curr_state_l)
-                episode_actions.append(action)
+                episode_actions.append(selected_action)
                 episode_rewards.append(reward)
                 episode_next_states.append(next_state_l)
                 episode_return_from_states.append(reward)
@@ -96,7 +105,8 @@ class Actor:
                 # Iterate through the replay memory and update the final return for all states, i.e don't add the
                 # state if it is already there but update reward for other states
                 for i in range(len(episode_return_from_states)):
-                    episode_return_from_states[i] += pow(self.discount, len(episode_return_from_states) - i) * reward
+                    episode_return_from_states[i] += pow(self.discount,
+                                                         len(episode_return_from_states) - i) * reward
 
             curr_state = next_state
         if total_reward > self.max_reward_for_game:
@@ -110,7 +120,7 @@ class Actor:
     def perform_imagination_rollouts(self, time_steps, start_state):
         """Rollout policy for one episode, update the replay memory and return total reward"""
         total_reward = 0
-        curr_state = start_state #self.env.reset()  # TODO sample first state from the DB?
+        curr_state = start_state  # self.env.reset()  # TODO sample first state from the DB?
         prev_state = curr_state
         # Initialize lists in order to store episode data
         episode_states = []
@@ -119,25 +129,11 @@ class Actor:
         episode_next_states = []
         episode_return_from_states = []
 
-        # True reward function TODO fix this into a reward function approximator?
-        self.theta_threshold_radians = 12 * 2 * np.math.pi / 360
-        self.x_threshold = 2.4
-
         for time in range(time_steps):
-            # Choose action based on current policy
-            action = self.choose_action(curr_state)
-            # Execute the action in the environment and observe reward
-            next_state = self.transition_model.predict(curr_state, action)
-
-            # Checking if game is over
-            done = next_state[0] < -self.x_threshold or next_state[0] > self.x_threshold or next_state[
-                                                                                                2] < -self.theta_threshold_radians or \
-                   next_state[2] > self.theta_threshold_radians
-            done = bool(done)
-            # Give reward of 1 if game is not over
-            reward = 1
-            if done:
-                reward = 0
+            # Choose selected_action based on current policy
+            selected_action, executed_action = self.choose_action(curr_state)
+            # Execute the selected_action in the environment and observe reward
+            next_state, reward, done, _ = self.transition_model.predict(curr_state, executed_action)
 
             # Update the total reward
             total_reward += reward
@@ -145,13 +141,13 @@ class Actor:
                 # print "Episode {} ended at step {} with total reward {}".format(episodeNumber, time, total_reward)
                 break
 
-            # Add state, action, reward transitions to containers for episode data
+            # Add state, selected_action, reward transitions to containers for episode data
             # [TODO: Store discounted return instead of just return to test]
             curr_state_l = curr_state.tolist()
             next_state_l = next_state.tolist()
             if curr_state_l not in episode_states:
                 episode_states.append(curr_state_l)
-                episode_actions.append(action)
+                episode_actions.append(selected_action)
                 episode_rewards.append(reward)
                 episode_next_states.append(next_state_l)
                 episode_return_from_states.append(reward)
@@ -203,20 +199,21 @@ class Actor:
 
     def choose_action(self, state, explore=True):
         """Chooses action from the crrent policy and weights"""
-        if random.random() < 0.0 and explore:
-            # Try with some epsilon greedy exploration together with the softmax action policy
-            action = np.random.choice(self.env.action_space.n)
+        state = np.asarray(state)
+        state = state.reshape(1, len(self.observation_space.high))
+        softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
+        if explore:
+            # Sample action from prob density
+            action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
         else:
-            state = np.asarray(state)
-            state = state.reshape(1, len(self.observation_space.high))
-            softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
-            if explore:
-                # Sample action from prob density
-                action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
-            else:
-                # Follow optimal policy (argmax)
-                action = np.argmax(softmax_out[0])
-        return action
+            # Follow optimal policy (argmax)
+            action = np.argmax(softmax_out[0])
+
+        # Action uncertainty (makes the environment non-discrete)
+        exec_action = action
+        if random.random() < self.action_uncertainty:
+            exec_action = np.random.choice(self.env.action_space.n)
+        return action, exec_action
 
     def update_memory(self, episode_states, episode_actions, episode_rewards, episode_next_states,
                       episode_return_from_states):
@@ -347,12 +344,13 @@ class Critic:
 
 class ActorCriticLearner:
     def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100,
-                 n_rollout_epochs=5,
+                 n_rollout_epochs=5, action_uncertainty=0.0,
                  logger=True, transition_model_restore_path='transition_model/tf_transition_model.ckpt'):
         self.env = env
         self.transition_model = model_based_learner.TF_Transition_model(env)
         self.transition_model.restore_model(restore_path=transition_model_restore_path)
-        self.actor = Actor(self.env, self.transition_model, discount, learning_rate=0.01)
+        self.actor = Actor(self.env, self.transition_model, n_rollout_epochs, action_uncertainty=action_uncertainty,
+                           discount=discount, learning_rate=0.01)
         self.critic = Critic(self.env, discount)
         self.last_episode = 0
         self.logger = logger
@@ -487,6 +485,6 @@ class ActorCriticLearner:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
                     break
 
-                # Trying with imagination rollouts for each episode
-                self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)
+                    # Trying with full imagination rollouts for each episode
+                    # self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)
         return state_action_history

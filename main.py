@@ -15,11 +15,11 @@ from my_actor_critic import ActorCriticLearner
 
 
 def main():
-    save_history = False
-    w_rollouts = False
     w_game_gui = False
+    gym_name = 'CartPole-v0'
+    action_uncertainty = 0.0  # 4/10 when 0.3 solved. 0/10 when 0.4
     n_pre_training_epochs = 200
-    n_rollout_epochs = 0
+    n_rollout_epochs = 0  # Disabled for now..
     n_agents = 100  # Train n different agents
     learning_rate = 0.01
     pre_training_learning_rate = 0.001
@@ -27,17 +27,17 @@ def main():
     end_episode = []
     for i in range(n_agents):
         print("Starting game nr:", i)
-        env = gym.make('CartPole-v0')
+        env = gym.make(gym_name)
         # env.seed(1234)
         # np.random.seed(1234)
         if w_game_gui:
-            env.monitor.start('./cartpole_0-pg-experiment', force=True)
+            env.monitor.start('./' + gym_name + '-pg-experiment', force=True)
         # Learning Parameters
         max_episodes = 1000
         episodes_before_update = 2
         discount = 0.85
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs,
-                                        n_rollout_epochs, logger=True,
+                                        n_rollout_epochs, action_uncertainty=action_uncertainty, logger=True,
                                         transition_model_restore_path='new_transition_model/random_agent/transition_model.ckpt')
         full_state_action_history.append(ac_learner.learn(200, 195, learning_rate=learning_rate,
                                                           imagination_learning_rate=pre_training_learning_rate))
@@ -45,16 +45,9 @@ def main():
         env.monitor.close()
     print("Done simulating...")
     print(end_episode)
-    if save_history:
-        np_state_history = []
-        print("Converting and saving...")
-        for i in range(len(full_state_action_history)):
-            for j in range(len(full_state_action_history[i])):
-                np_state_history.append(full_state_action_history[i][j])
-        np_state_history = np.array(np_state_history)
-        print(np_state_history.shape)
-        np.save("cartpole_data/testing.npy", full_state_action_history)
-        print("Done saving...")
+    print(np.mean(end_episode))
+    print(np.std(end_episode))
+    print(np.min(end_episode))
 
 
 if __name__ == "__main__":
