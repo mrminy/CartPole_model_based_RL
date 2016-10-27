@@ -11,7 +11,7 @@ H2 = 200
 batch_number = 500
 gamma = 0.99
 num_between_q_copies = 150
-explore_decay = 0.99  # Exploration decay per step
+explore_decay = 0.9995  # Exploration decay per step
 min_explore = 0.01
 max_steps = 200
 reward_goal = 195
@@ -25,7 +25,8 @@ class DQN:
         self.env = env
 
         self.transition_model = TF_Transition_model(env)
-        self.transition_model.restore_model(restore_path='new_transition_model/random_agent/transition_model.ckpt')
+        self.transition_model.restore_model(
+            restore_path='new_transition_model/random_agent_200000/transition_model.ckpt')
 
         self.graph = tf.Graph()
         self.all_assigns = None
@@ -101,7 +102,7 @@ class DQN:
         self.init = tf.initialize_all_variables()
 
     def train(self, max_episodes=1000, pre_learning_episodes=200, im_rollouts=True, logger=True):
-        explore = 1.0
+        explore = min_explore  # Keep minimal exploration in real life
         reward_list = []
         recent_rewards = []
         past_actions = []
@@ -152,11 +153,8 @@ class DQN:
                         im_done = False
                         im_state = state
                         while not im_done:
-                            if explore * 1.25 > random.random():
-                                im_action = self.env.action_space.sample()
-                            else:
-                                q = sess.run(self.Q, feed_dict={self.states_: np.array([state])})[0]
-                                im_action = np.argmax(q)
+                            # Only explore in simulation
+                            im_action = self.env.action_space.sample()
                             im_new_state, im_reward, im_done, _ = self.transition_model.predict(im_state, im_action)
                             self.D.append([im_state, im_action, im_reward, im_new_state, im_done])
                             if len(self.D) > memory_size:
@@ -245,11 +243,12 @@ class DQN:
                     # print "Q:{}, Q_ {}".format(q[0], qp[0])
                     # env.render()
 
-                if explore > random.random():
-                    action = self.env.action_space.sample()
-                else:
-                    q = sess.run(self.Q, feed_dict={self.states_: np.array([state])})[0]
-                    action = np.argmax(q)
+                # if explore > random.random() or True:
+                #     action = self.env.action_space.sample()
+                # else:
+                #     q = sess.run(self.Q, feed_dict={self.states_: np.array([state])})[0]
+                #     action = np.argmax(q)
+                action = self.env.action_space.sample()
                 explore = max(explore * explore_decay, min_explore)
 
                 new_state, reward, done, _ = self.transition_model.predict(state, action)  # self.env.step(action)
@@ -319,7 +318,7 @@ if __name__ == '__main__':
         print("Agent nr:", i)
         dqn = DQN(gym.make('CartPole-v0'))
         results.append(
-            dqn.train(max_episodes=1000, pre_learning_episodes=0, im_rollouts=True, logger=True))
+            dqn.train(max_episodes=1000, pre_learning_episodes=200, im_rollouts=True, logger=True))
     print(results)
     results = np.array(results)
     print("Avg:", np.mean(results))

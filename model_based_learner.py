@@ -82,7 +82,7 @@ class TF_Transition_model:
         testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
         print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=200000)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=10000)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -309,7 +309,7 @@ if __name__ == '__main__':
     # Maximum values found with both test set: [2.46059875  3.58683067  0.27366452  3.69079514]
 
     model.train(learning_rate=0.0005, training_epochs=30,
-                train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
+                train_data_path='cartpole_data/random_agent/training_data.npy', save=True,
                 save_path="new_transition_model/transition_model.ckpt")
     # Maximum values found with both test set: [2.46059875  3.519398    0.27262908  3.45911401]
 
