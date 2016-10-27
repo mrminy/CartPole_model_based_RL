@@ -122,6 +122,7 @@ class DQN:
             ticks = 0
             for episode in range(max_episodes):
                 state = self.env.reset()
+                start_state = state
 
                 reward_sum = 0
 
@@ -146,20 +147,6 @@ class DQN:
                     self.D.append([state, action, reward, new_state, done])
                     if len(self.D) > memory_size:
                         self.D.pop(0)
-
-                    # Do imagination rollouts
-                    if im_rollouts and len(self.D) < memory_size:
-                        # Choose random action for imagination rollouts
-                        im_done = False
-                        im_state = state
-                        while not im_done:
-                            # Only explore in simulation
-                            im_action = self.env.action_space.sample()
-                            im_new_state, im_reward, im_done, _ = self.transition_model.predict(im_state, im_action)
-                            self.D.append([im_state, im_action, im_reward, im_new_state, im_done])
-                            if len(self.D) > memory_size:
-                                self.D.pop(0)
-                            im_state = im_new_state
 
                     state = new_state
 
@@ -196,11 +183,27 @@ class DQN:
                         if ticks % num_between_q_copies == 0:
                             sess.run(self.all_assigns)
 
-                last_reward_sum = reward_sum
-                reward_list.append(reward_sum)
-                recent_rewards.append(reward_sum)
-                if len(recent_rewards) > 100:
-                    recent_rewards.pop(0)
+                # Do imagination rollouts
+                for r in range(1):
+                    if im_rollouts and len(self.D) < memory_size:
+                        # Choose random action for imagination rollouts
+                        im_done = False
+                        im_state = start_state
+                        while not im_done:
+                            # Only explore in simulation
+                            im_action = self.env.action_space.sample()
+                            im_new_state, im_reward, im_done, _ = self.transition_model.predict(im_state,
+                                                                                                im_action)
+                            self.D.append([im_state, im_action, im_reward, im_new_state, im_done])
+                            if len(self.D) > memory_size:
+                                self.D.pop(0)
+                            im_state = im_new_state
+
+                    last_reward_sum = reward_sum
+                    reward_list.append(reward_sum)
+                    recent_rewards.append(reward_sum)
+                    if len(recent_rewards) > 100:
+                        recent_rewards.pop(0)
 
                 mean = 0.0
                 if len(recent_rewards) > 0:
@@ -318,7 +321,7 @@ if __name__ == '__main__':
         print("Agent nr:", i)
         dqn = DQN(gym.make('CartPole-v0'))
         results.append(
-            dqn.train(max_episodes=1000, pre_learning_episodes=200, im_rollouts=True, logger=True))
+            dqn.train(max_episodes=1000, pre_learning_episodes=100, im_rollouts=True, logger=True))
     print(results)
     results = np.array(results)
     print("Avg:", np.mean(results))

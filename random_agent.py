@@ -3,16 +3,19 @@ import gym
 
 results = []
 env = gym.make('CartPole-v0')
-for i in range(10000):
+total_steps = 0
+for i in range(40):
     env.reset()
     last_step = 0
     for time_step in range(200):
         exec_action = np.random.choice(env.action_space.n)
         next_state, reward, done, info = env.step(exec_action)
         last_step += 1
+        total_steps += 1
 
         if done:
             break
+    print(total_steps)
     results.append(last_step)
 
 print(results)
