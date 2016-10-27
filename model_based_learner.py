@@ -111,9 +111,11 @@ class TF_Transition_model:
             def encoder(x):
                 layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['encoder_h1']),
                                             biases['encoder_b1']))
-                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['encoder_h2']),
+                layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
+                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1_drop, weights['encoder_h2']),
                                             biases['encoder_b2']))
-                return layer_2
+                layer_2_drop = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
+                return layer_2_drop
 
             # Building the transition network between the encoder and decoder
             def transition(x, x_action):
@@ -121,16 +123,17 @@ class TF_Transition_model:
                 layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['transition_h1']),
                                             biases['transition_b1']))
                 layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
-                return layer_1
+                return layer_1_drop
 
             # Building the decoder
             def decoder(x):
                 layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']),
                                             biases['decoder_b1']))
                 layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
-                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['decoder_h2']),
+                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1_drop, weights['decoder_h2']),
                                             biases['decoder_b2']))
-                return layer_2
+                layer_2_drop = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
+                return layer_2_drop
 
             # Construct model
             encoder_op = encoder(self.X)
@@ -142,8 +145,9 @@ class TF_Transition_model:
             # Targets (Labels) are the input data.
             y_true = self.Y
 
-            # Define loss, minimize the squared error
-            self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
+            # Define loss, minimize the squared error (with or without scaling)
+            # self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
+            self.loss_function = tf.reduce_mean(tf.pow(y_true - self.y_pred, 2))
 
             # L2 regularization
             # regularization = (tf.nn.l2_loss(weights['encoder_h1']) + tf.nn.l2_loss(biases['encoder_b1']) +
@@ -180,7 +184,7 @@ class TF_Transition_model:
         testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
         print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=99999999)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=10000)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -206,7 +210,7 @@ class TF_Transition_model:
                 # Run optimization op (backprop) and cost op (to get loss value)
                 _, c = self.sess.run([self.optimizer, self.loss_function],
                                      feed_dict={self.X: batch_xs, self.X_action: batch_x_action, self.Y: batch_ys,
-                                                self.keep_prob: 0.5})
+                                                self.keep_prob: 0.85})
                 if i % self.history_sampling_rate == 0:
                     self.cost_history.append(c)
                     sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
@@ -272,7 +276,7 @@ class TF_Transition_model:
     def scale_data(self, x, y):
         return x / self.input_scale, y / self.input_scale
 
-    def preprocess_data(self, value, max_data=999999999):
+    def preprocess_data(self, value, max_data=10000):
         x = []
         x_action = []
         y = []
@@ -304,6 +308,7 @@ if __name__ == '__main__':
     env = gym.make('CartPole-v0')
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
 
-    model.train(learning_rate=0.0005, training_epochs=10,
+    # Current best is no dropout, not regularization, no scaling in loss-function
+    model.train(training_epochs=1000,
                 train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
                 save_path="new_transition_model/transition_model.ckpt")

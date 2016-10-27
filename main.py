@@ -20,7 +20,7 @@ def main():
     action_uncertainty = 0.0  # 4/10 when 0.3 solved. 0/10 when 0.4
     n_pre_training_epochs = 200
     n_rollout_epochs = 0  # Disabled for now..
-    n_agents = 100  # Train n different agents
+    n_agents = 10  # Train n different agents
     learning_rate = 0.01
     pre_training_learning_rate = 0.001
     full_state_action_history = []
@@ -38,7 +38,7 @@ def main():
         discount = 0.85
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs,
                                         n_rollout_epochs, action_uncertainty=action_uncertainty, logger=True,
-                                        transition_model_restore_path='new_transition_model/random_agent/transition_model.ckpt')
+                                        transition_model_restore_path='new_transition_model/random_agent_10000_2/transition_model.ckpt')
         full_state_action_history.append(ac_learner.learn(200, 195, learning_rate=learning_rate,
                                                           imagination_learning_rate=pre_training_learning_rate))
         end_episode.append(ac_learner.last_episode)

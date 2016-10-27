@@ -62,3 +62,10 @@ Random agent transition model (pretraining 200, lr 0.01, imagination_lr = 0.001 
 BEST:   715.52
 AVG:    263.9736166798
 STDEV:  253
+
+
+10k_2 transition model, pre-training
+[753, 999, 111, 701, 175, 111, 261, 341, 99, 135]
+368.6
+310.716333655
+99
