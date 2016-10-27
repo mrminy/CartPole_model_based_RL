@@ -72,6 +72,104 @@ class TF_Transition_model:
         self.saver.restore(self.sess, restore_path)
         print("Model restored from file: %s" % restore_path)
 
+    def build_model(self, learning_rate=0.001):
+        print("Building graph...")
+        with self.graph.as_default():
+            # Encode curr_state, add transition prediction with selected action and decode to predicted output state
+            self.X = tf.placeholder("float", [None, self.n_input])  # current state input
+            self.X_action = tf.placeholder("float", [None, self.n_action])  # action input
+            self.Y = tf.placeholder("float", [None, self.n_output])  # output
+            self.keep_prob = tf.placeholder(tf.float32)  # For dropout
+
+            weights = {
+                'encoder_h1': tf.Variable(
+                    tf.random_uniform([self.n_input, self.n_hidden_1], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+                'encoder_h2': tf.Variable(
+                    tf.random_uniform([self.n_hidden_1, self.n_hidden_2], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+                'transition_h1': tf.Variable(
+                    tf.random_uniform([self.n_hidden_2 + self.n_action, self.n_hidden_transition],
+                                      minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+                'decoder_h1': tf.Variable(
+                    tf.random_uniform([self.n_hidden_transition, self.n_hidden_1], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+                'decoder_h2': tf.Variable(
+                    tf.random_uniform([self.n_hidden_1, self.n_output], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+            }
+            biases = {
+                'encoder_b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
+                'encoder_b2': tf.Variable(tf.random_normal([self.n_hidden_2])),
+                'transition_b1': tf.Variable(tf.random_normal([self.n_hidden_transition])),
+                'decoder_b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
+                'decoder_b2': tf.Variable(tf.random_normal([self.n_output])),
+            }
+
+            # Building the encoder
+            def encoder(x):
+                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['encoder_h1']),
+                                            biases['encoder_b1']))
+                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['encoder_h2']),
+                                            biases['encoder_b2']))
+                return layer_2
+
+            # Building the transition network between the encoder and decoder
+            def transition(x, x_action):
+                x = tf.concat(1, [x, x_action])
+                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['transition_h1']),
+                                            biases['transition_b1']))
+                layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
+                return layer_1
+
+            # Building the decoder
+            def decoder(x):
+                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']),
+                                            biases['decoder_b1']))
+                layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
+                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['decoder_h2']),
+                                            biases['decoder_b2']))
+                return layer_2
+
+            # Construct model
+            encoder_op = encoder(self.X)
+            transition_pred = transition(encoder_op, self.X_action)
+            decoder_op = decoder(transition_pred)
+
+            # Prediction
+            self.y_pred = decoder_op
+            # Targets (Labels) are the input data.
+            y_true = self.Y
+
+            # Define loss, minimize the squared error
+            self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
+
+            # L2 regularization
+            # regularization = (tf.nn.l2_loss(weights['encoder_h1']) + tf.nn.l2_loss(biases['encoder_b1']) +
+            #                   tf.nn.l2_loss(weights['encoder_h2']) + tf.nn.l2_loss(biases['encoder_b2']) +
+            #                   tf.nn.l2_loss(weights['transition_h1']) + tf.nn.l2_loss(biases['transition_b1']) +
+            #                   tf.nn.l2_loss(weights['decoder_h1']) + tf.nn.l2_loss(biases['decoder_b1']) +
+            #                   tf.nn.l2_loss(weights['decoder_h2']) + tf.nn.l2_loss(biases['decoder_b2']))
+            # Add the l2 loss to the loss function
+            # self.loss_function += 5e-4 * regularization
+            self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
+
+            # Evaluate model
+            # correct_pred = tf.equal(self.y_pred, y_true)
+            correct_pred = tf.pow(((y_true - self.y_pred) * self.input_scale), 2)
+            self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+            # Creates a saver
+            self.saver = tf.train.Saver()
+
+            # Initializing the variables
+            self.init = tf.initialize_all_variables()
+
+            # Launch the graph
+            self.sess = tf.Session(graph=self.graph)
+            self.sess.run(self.init)
+
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=True, show_test_acc=True,
               save=False, train_data_path='cartpole_data/train_reward.npy',
               test_data_path='cartpole_data/test_reward.npy',
@@ -82,7 +180,7 @@ class TF_Transition_model:
         testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
         print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=10000)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=99999999)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -193,103 +291,6 @@ class TF_Transition_model:
         x, x_action, y = np.array(x), np.array(x_action), np.array(y)
         return x, x_action, y
 
-    def build_model(self, learning_rate=0.001):
-        print("Building graph...")
-        with self.graph.as_default():
-            # Encode curr_state, add transition prediction with selected action and decode to predicted output state
-            self.X = tf.placeholder("float", [None, self.n_input])  # current state input
-            self.X_action = tf.placeholder("float", [None, self.n_action])  # action input
-            self.Y = tf.placeholder("float", [None, self.n_output])  # output
-            self.keep_prob = tf.placeholder(tf.float32)  # For dropout
-
-            weights = {
-                'encoder_h1': tf.Variable(
-                    tf.random_uniform([self.n_input, self.n_hidden_1], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
-                'encoder_h2': tf.Variable(
-                    tf.random_uniform([self.n_hidden_1, self.n_hidden_2], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
-                'transition_h1': tf.Variable(
-                    tf.random_uniform([self.n_hidden_2 + self.n_action, self.n_hidden_transition],
-                                      minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
-                'decoder_h1': tf.Variable(
-                    tf.random_uniform([self.n_hidden_transition, self.n_hidden_1], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
-                'decoder_h2': tf.Variable(
-                    tf.random_uniform([self.n_hidden_1, self.n_output], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
-            }
-            biases = {
-                'encoder_b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
-                'encoder_b2': tf.Variable(tf.random_normal([self.n_hidden_2])),
-                'transition_b1': tf.Variable(tf.random_normal([self.n_hidden_transition])),
-                'decoder_b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
-                'decoder_b2': tf.Variable(tf.random_normal([self.n_output])),
-            }
-
-            # Building the encoder
-            def encoder(x):
-                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['encoder_h1']),
-                                            biases['encoder_b1']))
-                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['encoder_h2']),
-                                            biases['encoder_b2']))
-                return layer_2
-
-            # Building the transition network between the encoder and decoder
-            def transition(x, x_action):
-                x = tf.concat(1, [x, x_action])
-                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['transition_h1']),
-                                            biases['transition_b1']))
-                layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
-                return layer_1
-
-            # Building the decoder
-            def decoder(x):
-                layer_1 = tf.nn.tanh(tf.add(tf.matmul(x, weights['decoder_h1']),
-                                            biases['decoder_b1']))
-                layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
-                layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1, weights['decoder_h2']),
-                                            biases['decoder_b2']))
-                return layer_2
-
-            # Construct model
-            encoder_op = encoder(self.X)
-            transition_pred = transition(encoder_op, self.X_action)
-            decoder_op = decoder(transition_pred)
-
-            # Prediction
-            self.y_pred = decoder_op
-            # Targets (Labels) are the input data.
-            y_true = self.Y
-
-            # Define loss, minimize the squared error
-            self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
-
-            # L2 regularization
-            # regularization = (tf.nn.l2_loss(weights['encoder_h1']) + tf.nn.l2_loss(biases['encoder_b1']) +
-            #                   tf.nn.l2_loss(weights['encoder_h2']) + tf.nn.l2_loss(biases['encoder_b2']) +
-            #                   tf.nn.l2_loss(weights['transition_h1']) + tf.nn.l2_loss(biases['transition_b1']) +
-            #                   tf.nn.l2_loss(weights['decoder_h1']) + tf.nn.l2_loss(biases['decoder_b1']) +
-            #                   tf.nn.l2_loss(weights['decoder_h2']) + tf.nn.l2_loss(biases['decoder_b2']))
-            # Add the l2 loss to the loss function
-            # self.loss_function += 5e-4 * regularization
-            self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
-
-            # Evaluate model
-            # correct_pred = tf.equal(self.y_pred, y_true)
-            correct_pred = tf.pow(((y_true - self.y_pred) * self.input_scale), 2)
-            self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
-
-            # Creates a saver
-            self.saver = tf.train.Saver()
-
-            # Initializing the variables
-            self.init = tf.initialize_all_variables()
-
-            # Launch the graph
-            self.sess = tf.Session(graph=self.graph)
-            self.sess.run(self.init)
 
 
 if __name__ == '__main__':
@@ -302,46 +303,7 @@ if __name__ == '__main__':
     """
     env = gym.make('CartPole-v0')
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    # Old x_max [2.3817147442718847, 2.9103841971082174, 0.20939462615293689, 2.6612303605854293]
-    # model.train(learning_rate=0.0005, training_epochs=30,
-    #             train_data_path='cartpole_data/random_agent/training_data.npy', save=True,
-    #             save_path="new_transition_model/transition_model.ckpt")
-    # Maximum values found with both test set: [2.46059875  3.58683067  0.27366452  3.69079514]
 
-    model.train(learning_rate=0.0005, training_epochs=30,
-                train_data_path='cartpole_data/random_agent/training_data.npy', save=True,
+    model.train(learning_rate=0.0005, training_epochs=10,
+                train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
                 save_path="new_transition_model/transition_model.ckpt")
-    # Maximum values found with both test set: [2.46059875  3.519398    0.27262908  3.45911401]
-
-"""
-30 epochs trained on a_c
-Final test error random agent: 1.42732e-05
-Final test error actor critic: 1.55221e-06
-[[-0.01268554 -0.05760668 -0.04464523  0.07498149]
- [-0.01433343 -0.11299857 -0.02561795  0.15847661]
- [-0.01756588 -0.16841235  0.01459703  0.2424502 ]
- [-0.02238348 -0.22386958  0.07612113  0.32742334]
- [-0.0287875  -0.27938685  0.15920799  0.41389601]]
-[[-0.01353095 -0.05727049 -0.04516043  0.07504165]
- [-0.01511772 -0.11251857 -0.02665925  0.15866895]
- [-0.0173834  -0.16769446  0.01339999  0.24265979]
- [-0.02103016 -0.22266482  0.07535179  0.32737523]
- [-0.0262944  -0.27759272  0.15892783  0.41424477]]
-
-30 epochs trained on r
-Final test error random agent: 1.41247e-06
-Final test error actor critic: 4.52601e-05
-[[-0.01268554 -0.05652367 -0.04447631  0.0702747 ]
- [-0.01433343 -0.11087419 -0.02552102  0.1485286 ]
- [-0.01756588 -0.16524618  0.0145418   0.22723095]
- [-0.02238348 -0.21966082  0.07583312  0.3068701 ]
- [-0.0287875  -0.27413436  0.1586056   0.38791465]]
-[[-0.0133454  -0.0568892  -0.0439763   0.0692116 ]
- [-0.01477456 -0.11096619 -0.02529106  0.14747195]
- [-0.01773186 -0.16490845  0.01447422  0.22606078]
- [-0.02255355 -0.21909066  0.07545467  0.30554152]
- [-0.02929129 -0.27353701  0.15783083  0.38661772]]
-
-AC result (modified scaling, 216 pre-training epochs, lr 0.001)
-[197, 165, 225, 179, 139, 473, 927, 999, 159, 233, 221, 427, 259, 161, 689, 139, 999, 353, 185, 777]
-"""

@@ -67,3 +67,17 @@ Full data set:
 Avg: 99.0
 Std: 0.0
 
+200k data set (only pre-training 200 full learning):
+[345, 317, 255, 176, 211, 174, 240, 202, 290, 172]
+Avg: 238.2
+Std: 59.1672206547
+
+10k data set (only pre-training 200 full learning):
+[246, 315, 303, 322, 190, 199, 262, 307, 243, 315]
+Avg: 270.2
+Std: 46.9271776266
+10k_2
+[278, 150, 239, 264, 141, 360, 257, 377, 265, 266]
+Avg: 259.7
+Std: 71.2741888765
+

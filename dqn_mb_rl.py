@@ -26,7 +26,7 @@ class DQN:
 
         self.transition_model = TF_Transition_model(env)
         self.transition_model.restore_model(
-            restore_path='new_transition_model/random_agent_200000/transition_model.ckpt')
+            restore_path='new_transition_model/random_agent_10000_2/transition_model.ckpt')
 
         self.graph = tf.Graph()
         self.all_assigns = None
@@ -102,7 +102,7 @@ class DQN:
         self.init = tf.initialize_all_variables()
 
     def train(self, max_episodes=1000, pre_learning_episodes=200, im_rollouts=True, logger=True):
-        explore = min_explore  # Keep minimal exploration in real life
+        explore = 1.0  # Keep minimal exploration in real life
         reward_list = []
         recent_rewards = []
         past_actions = []
@@ -243,12 +243,12 @@ class DQN:
                     # print "Q:{}, Q_ {}".format(q[0], qp[0])
                     # env.render()
 
-                # if explore > random.random() or True:
-                #     action = self.env.action_space.sample()
-                # else:
-                #     q = sess.run(self.Q, feed_dict={self.states_: np.array([state])})[0]
-                #     action = np.argmax(q)
-                action = self.env.action_space.sample()
+                if explore > random.random() or True:
+                    action = self.env.action_space.sample()
+                else:
+                    q = sess.run(self.Q, feed_dict={self.states_: np.array([state])})[0]
+                    action = np.argmax(q)
+                # action = self.env.action_space.sample()
                 explore = max(explore * explore_decay, min_explore)
 
                 new_state, reward, done, _ = self.transition_model.predict(state, action)  # self.env.step(action)
