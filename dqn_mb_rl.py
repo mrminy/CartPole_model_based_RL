@@ -26,7 +26,7 @@ class DQN:
 
         self.transition_model = TF_Transition_model(env)
         self.transition_model.restore_model(
-            restore_path='new_transition_model/random_agent_10000_2/transition_model.ckpt')
+            restore_path='new_transition_model/random_agent_1000/transition_model.ckpt')
 
         self.graph = tf.Graph()
         self.all_assigns = None

@@ -184,7 +184,7 @@ class TF_Transition_model:
         testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
         print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=10000)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=1000)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -309,6 +309,6 @@ if __name__ == '__main__':
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
 
     # Current best is no dropout, not regularization, no scaling in loss-function
-    model.train(training_epochs=300, learning_rate=0.0005,
+    model.train(training_epochs=3000, learning_rate=0.0005,
                 train_data_path='cartpole_data/random_agent/training_data.npy', save=True,
                 save_path="new_transition_model/transition_model.ckpt")
