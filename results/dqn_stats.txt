@@ -57,3 +57,14 @@ Std: 236.867916781
 Avg(5): 194.8
 Std(5): 40.4376062595
 
+[224, 154, 164, 168, 131, 117, 167, 135, 122, 145] - imagination rollouts from current state, exploration x1.25
+Avg: 152.7
+Std: 29.5162667016
+
+[173, 144, 125, 139, 155, 154, 160, 166, 130, 154] - imagination rollouts from current state, only exploration
+Avg: 150.0
+Std: 14.5739493618
+
+[126, 141, 163, 151, 169, 137, 155, 128, 137, 153] - imagination rollouts from current state, only exploration in im and no exploration in real life
+Avg: 146.0
+Std: 13.7258879494
