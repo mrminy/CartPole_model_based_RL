@@ -434,7 +434,7 @@ class ActorCriticLearner:
         total_steps = 0
         while True:
             state = self.env.reset()
-            for time_step in range(200):
+            for time_step in range(self.max_episodes):
                 action = np.random.choice(self.env.action_space.n)
                 next_state, reward, done, info = self.env.step(action)
                 all_experience.append([state, action, next_state, reward])
