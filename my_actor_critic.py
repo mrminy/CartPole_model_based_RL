@@ -114,7 +114,7 @@ class Actor:
 
         # Update the global replay memory
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
-                           episode_return_from_states)
+                           episode_return_from_states, True)
         return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
 
     def perform_imagination_rollouts(self, time_steps, start_state):
@@ -131,7 +131,7 @@ class Actor:
 
         for time in range(time_steps):
             # Choose selected_action based on current policy
-            selected_action, executed_action = self.choose_action(curr_state)
+            selected_action, executed_action = self.choose_action(curr_state, True)
             # Execute the selected_action in the environment and observe reward
             next_state, reward, done, _ = self.transition_model.predict(curr_state, executed_action)
 
@@ -169,7 +169,7 @@ class Actor:
         # self.update_memory(rollout_episode_states, rollout_episode_actions, rollout_episode_rewards,
         #                    rollout_episode_next_states, rollout_episode_return_from_states)
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
-                           episode_return_from_states)
+                           episode_return_from_states, False)
         return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
 
     def update_policy(self, advantage_vectors):
@@ -216,9 +216,9 @@ class Actor:
         return action, exec_action
 
     def update_memory(self, episode_states, episode_actions, episode_rewards, episode_next_states,
-                      episode_return_from_states):
+                      episode_return_from_states, real_data):
         """Updates the global replay memory"""
-        global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states
+        global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states, all_experience
         # Using first visit Monte Carlo so total return from a state is calculated from first time it is visited
 
         replay_states.append(episode_states)
@@ -226,6 +226,10 @@ class Actor:
         replay_rewards.append(episode_rewards)
         replay_next_states.append(episode_next_states)
         replay_return_from_states.append(episode_return_from_states)
+        if real_data:
+            for i in range(len(episode_states)):
+                all_experience.append(
+                    [episode_states[i], episode_actions[i], episode_next_states[i], episode_rewards[i]])
 
     def reset_memory(self):
         """Resets the global replay memory"""
@@ -348,7 +352,7 @@ class ActorCriticLearner:
                  logger=True, transition_model_restore_path='transition_model/tf_transition_model.ckpt'):
         self.env = env
         self.transition_model = model_based_learner.TF_Transition_model(env)
-        self.transition_model.restore_model(restore_path=transition_model_restore_path)
+        # self.transition_model.restore_model(restore_path=transition_model_restore_path)
         self.actor = Actor(self.env, self.transition_model, n_rollout_epochs, action_uncertainty=action_uncertainty,
                            discount=discount, learning_rate=0.01)
         self.critic = Critic(self.env, discount)
@@ -361,19 +365,19 @@ class ActorCriticLearner:
         self.max_episodes = max_episodes
         self.episodes_before_update = episodes_before_update
 
-        global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states
+        global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states, all_experience
         replay_states = []
         replay_actions = []
         replay_rewards = []
         replay_next_states = []
         replay_return_from_states = []
+        all_experience = []
 
     def pre_learn(self, max_env_time_steps, goal_avg_score, n_epochs=1, logger=True):
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0
         latest_rewards = []
-        update = True
         old_lr = self.actor.learning_rate
         self.actor.learning_rate = self.actor.imagination_learning_rate
 
@@ -425,11 +429,43 @@ class ActorCriticLearner:
                     break
         self.actor.learning_rate = old_lr
 
+    def gather_random_data(self, n_steps=1000):
+        global all_experience
+        total_steps = 0
+        while True:
+            state = self.env.reset()
+            for time_step in range(200):
+                action = np.random.choice(self.env.action_space.n)
+                next_state, reward, done, info = self.env.step(action)
+                all_experience.append([state, action, next_state, reward])
+                state = next_state
+                total_steps += 1
+
+                if done or total_steps >= n_steps:
+                    break
+            if total_steps >= n_steps:
+                break
+
     def learn(self, max_env_time_steps, goal_avg_score, learning_rate=0.01, imagination_learning_rate=0.0001):
         self.actor.imagination_learning_rate = imagination_learning_rate
         self.actor.learning_rate = learning_rate
-        # Pre-training
-        self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_pre_training_epochs)
+
+        if self.n_pre_training_epochs != 0:
+            # Gathering data for imagination rollouts
+            self.gather_random_data(1000)
+
+            # Train transition model on gathered data and pre-train actor-critic from imagination rollouts
+            global all_experience
+            training_data = np.array(all_experience)
+            if len(training_data) >= 1000:
+                print("Training size:", len(training_data))
+                self.transition_model = model_based_learner.TF_Transition_model(self.env, display_step=500)
+                acc1, acc2 = self.transition_model.train(training_epochs=3000, learning_rate=0.0005,
+                                                         training_data=training_data, logger=False)
+                self.actor.transition_model = self.transition_model
+
+                # Doing imagination episodes if test error is less than a threshold
+                self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_pre_training_epochs)
 
         state_action_history = []
         advantage_vectors = []
@@ -456,9 +492,7 @@ class ActorCriticLearner:
                 avg_reward = sum_reward / self.episodes_before_update
                 if self.logger:
                     print("Current {} episode average reward: {}".format(i, avg_reward))
-                # In this part of the code I try to reduce the effects of randomness leading to oscillations in my
-                # network by sticking to a solution if it is close to final solution.
-                # If the average reward for past batch of episodes exceeds that for solving the environment, continue with it
+
                 if avg_reward >= goal_avg_score:  # This is the criteria for having solved the environment by Open-AI Gym
                     update = False
                 else:
@@ -487,4 +521,5 @@ class ActorCriticLearner:
 
                     # Trying with full imagination rollouts for each episode
                     # self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)
+        print("All real life steps:", len(all_experience))
         return state_action_history

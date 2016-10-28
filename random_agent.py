@@ -3,6 +3,7 @@ import gym
 
 results = []
 env = gym.make('CartPole-v0')
+env.monitor.start('cartpole_0-pg-experiment/', force=True)
 total_steps = 0
 for i in range(40):
     env.reset()
@@ -19,6 +20,7 @@ for i in range(40):
     results.append(last_step)
 
 print(results)
+print(sum(env.monitor.stats_recorder.episode_lengths))
 
 
 """

@@ -81,3 +81,24 @@ STDEV:  253
 390.2
 381.78025093
 99
+
+
+live training transition model on training agent's data set (200 pre-training after 1000 time steps)
+[999, 213, 999, 297, 159, 367, 139, 287, 139, 165]
+376.4
+319.533472425
+139
+
+live training transition model on random agent before training the actor-critic (10k random steps, 200 pre-training episodes)
+[99, 219, 303, 99, 143]
+172.6
+78.5712415582
+99
+
+1k random generated steps
+Sum steps: [43014, 20800, 41047, 20341, 60789, 41893, 23297, 25078, 28410, 22761]
+Sum rewards: [43014.0, 20800.0, 41047.0, 20341.0, 60789.0, 41893.0, 23297.0, 25078.0, 28410.0, 22761.0]
+End episodes: [459, 99, 309, 99, 383, 223, 165, 205, 169, 115]
+Mean: 222.6
+Std: 117.350074563
+Best: 99

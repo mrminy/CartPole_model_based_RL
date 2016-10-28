@@ -14,8 +14,220 @@ import matplotlib.pyplot as plt
 import common
 
 
+class TF_Reward_model:
+    def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
+        self.env = env
+        self.max_reward = 1.0  # TODO replace with env.max_reward
+        self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Correct scaling based on env
+        self.history_sampling_rate = history_sampling_rate
+        self.w_init_limit = w_init_limit
+        self.display_step = display_step
+
+        self.graph = tf.Graph()
+
+        # tf placeholders
+        self.X = None
+        self.X_action = None
+        self.Y = None
+        self.y_pred = None
+        self.sess = None
+        self.keep_prob = None  # for dropout
+        self.saver = None
+
+        # Network Parameters
+        self.n_action = self.env.action_space.n
+        self.state_space = self.env.observation_space.shape[0]
+        self.n_input = self.env.observation_space.shape[0] + self.env.action_space.n  # State + action
+        self.n_output = 1  # Predicted next state
+        self.n_hidden_1 = 20  # 1st layer num features
+        self.n_hidden_2 = 20  # 2nd layer num features
+
+        self.cost_history = []
+        self.test_acc_history = []
+
+    def predict(self, curr_state, action):
+        """
+        :param curr_state: the current state of the environment
+        :param action: the selected action to take for this state
+        :return: the predicted next state
+        """
+        assert len(curr_state) == self.n_input
+        state_representation = np.array(curr_state)
+        state_representation /= self.max_reward
+        # Keep prob can be reduced a bit to generate uncertainty in model
+        transition_prediction = self.sess.run(self.y_pred,
+                                              feed_dict={self.X: [state_representation], self.X_action: [[action]],
+                                                         self.keep_prob: 1.0})
+
+        # Returning the predicted transition (next state) rescaled back to normal
+        return transition_prediction[0] * self.max_reward
+
+    def restore_model(self, restore_path='reward_model/tf_reward_model.ckpt'):
+        self.build_model()
+        self.saver.restore(self.sess, restore_path)
+        print("Model restored from file: %s" % restore_path)
+
+    def build_model(self, learning_rate=0.001):
+        print("Building graph...")
+        with self.graph.as_default():
+            # Encode curr_state, add transition prediction with selected action and decode to predicted output state
+            self.X = tf.placeholder("float", [None, self.state_space])  # current state input
+            self.X_action = tf.placeholder("float", [None, self.n_action])  # action input
+            self.Y = tf.placeholder("float", [None, self.n_output])  # output
+            self.keep_prob = tf.placeholder(tf.float32)  # For dropout
+
+            weights = {
+                'h1': tf.Variable(
+                    tf.random_uniform([self.n_input, self.n_hidden_1], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+                'h2': tf.Variable(
+                    tf.random_uniform([self.n_hidden_1, self.n_hidden_2], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
+            }
+            biases = {
+                'b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
+                'b2': tf.Variable(tf.random_normal([self.n_hidden_2])),
+            }
+
+            input = tf.concat(1, [self.X, self.X_action])
+            layer_1 = tf.nn.tanh(tf.add(tf.matmul(input, weights['h1']), biases['b1']))
+            layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
+            layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1_drop, weights['h2']), biases['b2']))
+            out = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
+
+            # Prediction
+            self.y_pred = out
+            # Targets (Labels) are the input data.
+            y_true = self.Y
+
+            # Define loss, minimize the squared error (with or without scaling)
+            # self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
+            self.loss_function = tf.reduce_mean(tf.pow(y_true - self.y_pred, 2))
+            self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
+
+            # Evaluate model
+            self.accuracy = tf.reduce_mean(tf.cast(self.loss_function, tf.float32))
+
+            # Creates a saver
+            self.saver = tf.train.Saver()
+
+            # Initializing the variables
+            self.init = tf.initialize_all_variables()
+
+            # Launch the graph
+            self.sess = tf.Session(graph=self.graph)
+            self.sess.run(self.init)
+
+    def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
+              save=False, training_data=None, train_data_path='cartpole_data/train_reward.npy',
+              test_data_path='cartpole_data/test_reward.npy',
+              save_path='transition_model/tf_transition_model.ckpt', test=True, logger=True):
+        # Load data
+        if logger:
+            print("Loading data...")
+        if training_data is None:
+            training_data = np.load(train_data_path)
+        else:
+            training_data = training_data
+        testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
+        testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
+        if logger:
+            print("Preprocessing data...")
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=200000)
+        X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
+        X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
+        X_train, Y_train = self.scale_data(X_train, Y_train)
+        X_test_r, Y_test_r = self.scale_data(X_test_r, Y_test_r)
+        X_test_a_c, Y_test_a_c = self.scale_data(X_test_a_c, Y_test_a_c)
+
+        self.build_model(learning_rate=learning_rate)
+
+        total_batch = int(len(X_train) / batch_size)
+        if logger:
+            print("Starting training...")
+            print("Total nr of batches:", total_batch)
+        # Training cycle
+        for epoch in range(training_epochs):
+            # Loop over all batches
+            c = None
+            idexes = np.arange(len(X_train))
+            for i in range(total_batch):
+                idx = np.random.choice(idexes, batch_size, replace=True)
+                batch_xs = X_train[idx]
+                batch_x_action = X_train_action[idx]
+                batch_ys = Y_train[idx]
+                # Run optimization op (backprop) and cost op (to get loss value)
+                _, c = self.sess.run([self.optimizer, self.loss_function],
+                                     feed_dict={self.X: batch_xs, self.X_action: batch_x_action, self.Y: batch_ys,
+                                                self.keep_prob: 1.0})
+                if i % self.history_sampling_rate == 0:
+                    self.cost_history.append(c)
+                    sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
+                    self.test_acc_history.append(self.sess.run(self.accuracy,
+                                                               feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                          self.X_action: X_test_action_r[
+                                                                              sampled_indexes],
+                                                                          self.Y: Y_test_r[sampled_indexes],
+                                                                          self.keep_prob: 1.0}))
+
+            # Display logs per epoch step
+            if epoch % self.display_step == 0 and c is not None:
+                test_error = self.sess.run(self.accuracy, feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                     self.X_action: X_test_action_r[sampled_indexes],
+                                                                     self.Y: Y_test_r[sampled_indexes],
+                                                                     self.keep_prob: 1.0})
+                print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
+                      "{:.9f}".format(test_error))
+
+        acc_random_agent = self.sess.run(self.accuracy,
+                                         feed_dict={self.X: X_test_r, self.X_action: X_test_action_r, self.Y: Y_test_r,
+                                                    self.keep_prob: 1.0})
+        print("Final test error random agent:", acc_random_agent)
+        acc_actor_critic = self.sess.run(self.accuracy,
+                                         feed_dict={self.X: X_test_a_c, self.X_action: X_test_action_a_c,
+                                                    self.Y: Y_test_a_c, self.keep_prob: 1.0})
+        print("Final test error actor critic:", acc_actor_critic)
+
+        if save:
+            save_path = self.saver.save(self.sess, save_path)
+            print("Model saved in file: %s" % save_path)
+
+        if show_test_acc:
+            y_axis = np.array(self.test_acc_history)
+            plt.plot(y_axis)
+            plt.show()
+
+        if show_cost:
+            y_axis = np.array(self.cost_history)
+            plt.plot(y_axis)
+            plt.show()
+
+        return acc_random_agent, acc_actor_critic
+
+    def scale_data(self, x, y):
+        return x / self.max_reward, y / self.max_reward
+
+    def preprocess_data(self, value, max_data=999999999):
+        x = []
+        x_action = []
+        y = []
+        for d in value:
+            if abs(d[3]) > self.max_reward:
+                self.max_reward = abs(d[3])
+
+            x.append(np.array(d[0]))  # State t and
+            ac = np.zeros(self.n_action)
+            ac[int(d[1])] = 1.0
+            x_action.append(ac)  # Action
+            y.append(np.array([d[3]]))  # Reward
+            if len(y) >= max_data:
+                break
+        x, x_action, y = np.array(x), np.array(x_action), np.array(y)
+        return x, x_action, y
+
+
 class TF_Transition_model:
-    def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5)):
+    def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.graph = tf.Graph()
         self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Correct scaling based on env
@@ -24,7 +236,7 @@ class TF_Transition_model:
         # self.input_scale = [2.46059875, 3.519398, 0.27262908, 3.45911401]  # Scaling for actor critic
 
         # Training parameters
-        self.display_step = 1
+        self.display_step = display_step
         self.examples_to_show = 5
         self.w_init_limit = w_init_limit  # The limit of the initialization of the weights
         self.x_max = self.env.observation_space.low  # For correct scaling # TODO try with just self.env.observation_space.high
@@ -174,29 +386,36 @@ class TF_Transition_model:
             self.sess = tf.Session(graph=self.graph)
             self.sess.run(self.init)
 
-    def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=True, show_test_acc=True,
-              save=False, train_data_path='cartpole_data/train_reward.npy',
+    def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
+              save=False, training_data=None, train_data_path='cartpole_data/train_reward.npy',
               test_data_path='cartpole_data/test_reward.npy',
-              save_path='transition_model/tf_transition_model.ckpt', test=True):
+              save_path='transition_model/tf_transition_model.ckpt', test=True, logger=True):
         # Load data
-        print("Loading data...")
-        training_data = np.load(train_data_path)
+        if logger:
+            print("Loading data...")
+        if training_data is None:
+            training_data = np.load(train_data_path)
+        else:
+            training_data = training_data
         testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
-        print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=1000)
+        if logger:
+            print("Preprocessing data...")
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
         X_train, Y_train = self.scale_data(X_train, Y_train)
         X_test_r, Y_test_r = self.scale_data(X_test_r, Y_test_r)
         X_test_a_c, Y_test_a_c = self.scale_data(X_test_a_c, Y_test_a_c)
-        print("Maximum values found:", self.x_max)
+        if logger:
+            print("Maximum values found:", self.x_max)
 
         self.build_model(learning_rate=learning_rate)
 
         total_batch = int(len(X_train) / batch_size)
-        print("Starting training...")
-        print("Total nr of batches:", total_batch)
+        if logger:
+            print("Starting training...")
+            print("Total nr of batches:", total_batch)
         # Training cycle
         for epoch in range(training_epochs):
             # Loop over all batches
@@ -296,7 +515,6 @@ class TF_Transition_model:
         return x, x_action, y
 
 
-
 if __name__ == '__main__':
     """
     TODO
@@ -306,9 +524,16 @@ if __name__ == '__main__':
     - Try regularization L2?
     """
     env = gym.make('CartPole-v0')
-    model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+    # model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
 
-    # Current best is no dropout, not regularization, no scaling in loss-function
-    model.train(training_epochs=3000, learning_rate=0.0005,
-                train_data_path='cartpole_data/random_agent/training_data.npy', save=True,
+    # # Current best is no dropout, not regularization, no scaling in loss-function
+    # model.train(training_epochs=3000, learning_rate=0.0005,
+    #             train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
+    #             save_path="new_transition_model/transition_model.ckpt")
+
+
+    # Reward model
+    model = TF_Reward_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+    model.train(training_epochs=5, learning_rate=0.001, logger=True,
+                train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
                 save_path="new_transition_model/transition_model.ckpt")

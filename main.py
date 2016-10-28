@@ -15,16 +15,18 @@ from my_actor_critic import ActorCriticLearner
 
 
 def main():
-    w_game_gui = False
-    gym_name = 'CartPole-v0'
+    w_game_gui = True
+    gym_name = 'CartPole-v1'
     action_uncertainty = 0.0  # 4/10 when 0.3 solved. 0/10 when 0.4
-    n_pre_training_epochs = 200
+    n_pre_training_epochs = 0
     n_rollout_epochs = 0  # Disabled for now..
     n_agents = 10  # Train n different agents
     learning_rate = 0.01
     pre_training_learning_rate = 0.001
     full_state_action_history = []
     end_episode = []
+    sum_steps = []
+    sum_rewards = []
     for i in range(n_agents):
         print("Starting game nr:", i)
         env = gym.make(gym_name)
@@ -41,13 +43,17 @@ def main():
                                         transition_model_restore_path='new_transition_model/random_agent_10000_2/transition_model.ckpt')
         full_state_action_history.append(ac_learner.learn(200, 195, learning_rate=learning_rate,
                                                           imagination_learning_rate=pre_training_learning_rate))
+        sum_steps.append(sum(env.monitor.stats_recorder.episode_lengths))
+        sum_rewards.append(sum(env.monitor.stats_recorder.episode_rewards))
         end_episode.append(ac_learner.last_episode)
         env.monitor.close()
     print("Done simulating...")
-    print(end_episode)
-    print(np.mean(end_episode))
-    print(np.std(end_episode))
-    print(np.min(end_episode))
+    print("Sum steps:", sum_steps)
+    print("Sum rewards:", sum_rewards)
+    print("End episodes:", end_episode)
+    print("Mean:", np.mean(end_episode))
+    print("Std:", np.std(end_episode))
+    print("Best:", np.min(end_episode))
 
 
 if __name__ == "__main__":

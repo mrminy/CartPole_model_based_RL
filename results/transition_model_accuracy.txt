@@ -153,3 +153,5 @@ Final test error actor critic: 0.000275583
 Random_agent data set (only 10k first) (100 epochs)
 Final test error random agent: 0.000294093
 Final test error actor critic: 0.00119497
+
+Random_agent data set (only 10k first) (3000 epochs, lr 0.0005)
