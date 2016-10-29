@@ -6,3 +6,8 @@ Mean: 926.8
 Std: 155.345936542
 Best: 477
 
+1k live pre-training
+End episodes: [999, 999, 999, 99, 99, 999, 281, 999, 999, 999]
+Mean: 747.2
+Std: 387.490851505
+Best: 99
