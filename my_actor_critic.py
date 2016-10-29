@@ -204,7 +204,7 @@ class Actor:
         softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
         if explore:
             # Sample action from prob density
-            action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
+            action = np.random.choice(np.arange(max(2, self.action_space_n)), 1, replace=True, p=softmax_out[0])[0]
         else:
             # Follow optimal policy (argmax)
             action = np.argmax(softmax_out[0])

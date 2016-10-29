@@ -16,7 +16,7 @@ from my_actor_critic import ActorCriticLearner
 
 def main():
     w_game_gui = True
-    gym_name = 'CartPole-v1'
+    gym_name = 'LunarLander-v2'
     action_uncertainty = 0.0  # 4/10 when 0.3 solved. 0/10 when 0.4
     n_pre_training_epochs = 0
     n_rollout_epochs = 0  # Disabled for now..
@@ -41,7 +41,7 @@ def main():
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_epochs,
                                         n_rollout_epochs, action_uncertainty=action_uncertainty, logger=True,
                                         transition_model_restore_path='new_transition_model/random_agent_10000_2/transition_model.ckpt')
-        full_state_action_history.append(ac_learner.learn(500, 475, learning_rate=learning_rate,
+        full_state_action_history.append(ac_learner.learn(1000, 200, learning_rate=learning_rate,
                                                           imagination_learning_rate=pre_training_learning_rate))
         sum_steps.append(sum(env.monitor.stats_recorder.episode_lengths))
         sum_rewards.append(sum(env.monitor.stats_recorder.episode_rewards))
