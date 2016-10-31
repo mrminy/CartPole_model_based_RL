@@ -1,3 +1,7 @@
+self.input_scale = [2.5, 3.58683067, 0.28, 3.69079514]
+self.input_scale = [2.46059875, 3.58683067, 0.27366452, 3.69079514] # Scaling for random agent
+self.input_scale = [2.46059875, 3.519398, 0.27262908, 3.45911401]  # Scaling for actor critic
+
 All fixed with 0.0005 lr, batch_size=128, [64,64,128,64,64], w_init(-0.2,0.2)
 
 Random training/test set

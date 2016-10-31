@@ -35,10 +35,7 @@ class TF_Reward_model:
         self.saver = None
 
         # Network Parameters
-        if self.env.action_space.n <= 2:
-            self.n_action = 1
-        else:
-            self.n_action = self.env.action_space.n
+        self.n_action = common.get_n_action(self.env.action_space.n)
         self.state_space = self.env.observation_space.shape[0]
         self.n_input = self.env.observation_space.shape[0] + self.n_action  # State + action
         self.n_output = 1  # Predicted reward
@@ -128,23 +125,14 @@ class TF_Reward_model:
             self.sess.run(self.init)
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
-              save=False, training_data=None, train_data_path='cartpole_data/train_reward.npy',
-              test_data_path='cartpole_data/test_reward.npy',
-              save_path='transition_model/tf_transition_model.ckpt', test=True, logger=True):
-        # Load data
-        if logger:
-            print("Loading data...")
-        if training_data is None:
-            training_data = np.load(train_data_path)
-        else:
-            training_data = training_data
-        testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
-        testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
+              save=False, training_data=None, test_data_r=None, test_data_ac=None,
+              save_path='transition_model/tf_transition_model.ckpt', logger=True):
+        # Load and preprocess data
         if logger:
             print("Preprocessing data...")
         X_train, X_train_action, Y_train = self.preprocess_data(training_data)
-        X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
-        X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
+        X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(test_data_r)
+        X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(test_data_ac)
         X_train, Y_train = self.scale_data(X_train, Y_train)
         X_test_r, Y_test_r = self.scale_data(X_test_r, Y_test_r)
         X_test_a_c, Y_test_a_c = self.scale_data(X_test_a_c, Y_test_a_c)
@@ -228,7 +216,7 @@ class TF_Reward_model:
                     self.x_max[j] = abs(d[0][j])
                 if abs(d[2][j]) > self.x_max[j]:
                     self.x_max[j] = abs(d[2][j])
-            x.append(np.array(d[2]))  # Next state (t+1)
+            x.append(np.array(d[0]))  # TODO Next state (t+1) or current state t?
             if self.n_action > 1:
                 ac = np.zeros(self.n_action)
                 ac[int(d[1])] = 1.0
@@ -246,18 +234,18 @@ class TF_Transition_model:
     def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.graph = tf.Graph()
-        # self.input_scale = input_scale  # [4.8, 4.0, 0.418879020479, 4.0]  # Correct scaling based on CartPole
-        # self.input_scale = [2.5, 3.58683067, 0.28, 3.69079514]  # TODO make this not fixed
-        # self.input_scale = [2.46059875, 3.58683067, 0.27366452, 3.69079514] # Scaling for random agent
-        # self.input_scale = [2.46059875, 3.519398, 0.27262908, 3.45911401]  # Scaling for actor critic
-        self.reward_model = TF_Reward_model(env, history_sampling_rate=history_sampling_rate, w_init_limit=w_init_limit,
-                                            display_step=display_step)
+        if len(self.env.observation_space.low) == 4:
+            self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Scaling for CartPole
+        else:
+            self.input_scale = [4.8, 4.0, 0.418879020479, 4.0, 0.0, 0.0, 0.0, 0.0]  # Scaling for LunarLander
+        # self.reward_model = TF_Reward_model(env, history_sampling_rate=history_sampling_rate, w_init_limit=w_init_limit,
+        #                                     display_step=display_step)
 
         # Training parameters
         self.display_step = display_step
         self.examples_to_show = 5
         self.w_init_limit = w_init_limit  # The limit of the initialization of the weights
-        self.x_max = self.env.observation_space.low  # For correct scaling # TODO try with just self.env.observation_space.high
+        self.x_max = self.env.observation_space.low  # Scaling based on training data
 
         # tf placeholders
         self.X = None
@@ -292,10 +280,10 @@ class TF_Transition_model:
         state_representation /= self.x_max
 
         if self.env.action_space.n <= 2:
-            action_conv = [action]  # Action
+            action_conv = [action]  # Binary action input
         else:
             action_conv = np.zeros(self.env.action_space.n)
-            action_conv[action] = 1.0
+            action_conv[action] = 1.0  # Hot shot action input
 
         # Keep prob can be reduced a bit to generate uncertainty in model
         transition_prediction = self.sess.run(self.y_pred,
@@ -304,10 +292,10 @@ class TF_Transition_model:
 
         # Returning the predicted transition (next state) rescaled back to normal
         next_state = transition_prediction[0] * self.x_max
-        reward = self.reward_model.predict(next_state, action_conv)
+        # reward = self.reward_model.predict(curr_state, action_conv)
+        reward, done = common.reward_function(curr_state)
 
-        # TODO make done model as well
-        if abs(next_state[0]) == 0:
+        if reward == 0.0:
             done = True
         else:
             done = False
@@ -421,24 +409,19 @@ class TF_Transition_model:
             self.sess.run(self.init)
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
-              save=False, training_data=None, train_data_path='cartpole_data/train_reward.npy',
-              test_data_path='cartpole_data/test_reward.npy',
-              save_path='transition_model/tf_transition_model.ckpt', test=True, logger=True):
-        # Load data
-        if logger:
-            print("Loading data...")
-        if training_data is None:
-            training_data = np.load(train_data_path)
-        else:
-            training_data = training_data
-        testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
-        testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
-        self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data, logger=logger)
+              save=False, training_data=None, test_data_r=None, test_data_ac=None,
+              save_path='transition_model/tf_transition_model.ckpt', logger=True):
+
+        # Train reward model
+        # self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
+        #                         test_data_r=test_data_r, test_data_ac=test_data_ac,
+        #                         logger=logger)
+
         if logger:
             print("Preprocessing data...")
         X_train, X_train_action, Y_train = self.preprocess_data(training_data)
-        X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
-        X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
+        X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(test_data_r)
+        X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(test_data_ac)
         X_train, Y_train = self.scale_data(X_train, Y_train)
         X_test_r, Y_test_r = self.scale_data(X_test_r, Y_test_r)
         X_test_a_c, Y_test_a_c = self.scale_data(X_test_a_c, Y_test_a_c)
@@ -525,6 +508,9 @@ class TF_Transition_model:
             # plt.axis([0, len(self.cost_history), 0, np.max(y_axis) * 1.1])
             plt.show()
 
+        np.savetxt("cost.csv", self.cost_history, delimiter=",")
+        np.savetxt("acc.csv", self.test_acc_history, delimiter=",")
+
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
@@ -564,16 +550,19 @@ if __name__ == '__main__':
     - Try regularization L2?
     """
     env = gym.make('CartPole-v0')
-    # model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+
+    training_data = np.load('cartpole_data/random_agent/training_data.npy')
+    test_data_r = np.load('cartpole_data/random_agent/testing_data.npy')
+    test_data_ac = np.load('cartpole_data/actor_critic/testing_data.npy')
 
     # # Current best is no dropout, not regularization, no scaling in loss-function
-    # model.train(training_epochs=3000, learning_rate=0.0005,
-    #             train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
-    #             save_path="new_transition_model/transition_model.ckpt")
+    model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+    model.train(training_epochs=3000, learning_rate=0.0005, training_data=training_data[:1000], test_data_r=test_data_r,
+                test_data_ac=test_data_ac, save=False,
+                save_path="new_transition_model/transition_model.ckpt")
 
 
     # Reward model
-    model = TF_Reward_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    model.train(training_epochs=3000, learning_rate=0.001, logger=True,
-                train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
-                save_path="new_transition_model/transition_model.ckpt")
+    # model = TF_Reward_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+    # model.train(training_epochs=3000, learning_rate=0.001, logger=True, save=False,
+    #             save_path="new_transition_model/transition_model.ckpt")

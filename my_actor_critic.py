@@ -10,7 +10,6 @@ import random
 import numpy as np
 import tensorflow as tf
 
-import common
 import model_based_learner
 
 
@@ -32,7 +31,6 @@ class Actor:
         self.graph = tf.Graph()
 
         self.transition_model = transition_model
-        # self.reward_model = reward_model # TODO
 
         # Build the graph when instantiated
         with self.graph.as_default():
@@ -53,7 +51,7 @@ class Actor:
             self.log_action_probability = tf.reduce_sum(self.action_input * tf.log(self.policy))
             self.loss = -self.log_action_probability * self.y  # Loss is score function times advantage
             # Use Adam Optimizer to optimize
-            # [TODO: Add Trust Region Policy Optimization(TRPO)]
+
             self.optim = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
             # Initializing all variables
             self.init = tf.initialize_all_variables()
@@ -88,7 +86,6 @@ class Actor:
                 break
 
             # Add state, selected_action, reward transitions to containers for episode data
-            # [TODO: Store discounted return instead of just return to test]
             curr_state_l = curr_state.tolist()
             next_state_l = next_state.tolist()
             if curr_state_l not in episode_states:
@@ -120,7 +117,7 @@ class Actor:
     def perform_imagination_rollouts(self, time_steps, start_state):
         """Rollout policy for one episode, update the replay memory and return total reward"""
         total_reward = 0
-        curr_state = start_state  # self.env.reset()  # TODO sample first state from the DB?
+        curr_state = start_state
         prev_state = curr_state
         # Initialize lists in order to store episode data
         episode_states = []
@@ -138,11 +135,9 @@ class Actor:
             # Update the total reward
             total_reward += reward
             if done or time >= self.env.spec.timestep_limit:
-                # print "Episode {} ended at step {} with total reward {}".format(episodeNumber, time, total_reward)
                 break
 
             # Add state, selected_action, reward transitions to containers for episode data
-            # [TODO: Store discounted return instead of just return to test]
             curr_state_l = curr_state.tolist()
             next_state_l = next_state.tolist()
             if curr_state_l not in episode_states:
@@ -174,11 +169,9 @@ class Actor:
 
     def update_policy(self, advantage_vectors):
         """Updates the policy weights by running gradient descent on one state at a time"""
-        # [TODO: Try out batch gradient descent in this case as well]
         global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states
 
         for i in range(len(replay_states)):
-
             states = replay_states[i]
             actions = replay_actions[i]
             advantage_vector = advantage_vectors[i]
@@ -239,7 +232,6 @@ class Actor:
     def to_action_input(self, action):
         """Utility function to convert action to a format suitable for the neura networ input"""
         action_input = [0] * self.action_space_n
-        # print "Action going in: ", action
         action_input[action] = 1
         action_input = np.asarray(action_input)
         action_input = action_input.reshape(1, self.action_space_n)
@@ -308,7 +300,8 @@ class Critic:
                                                                                 replay_return_from_states)
                     # Fit training data using batch
                     self.sess.run(self.optim,
-                                  feed_dict={self.state_input: batch_state_input, self.return_input: batch_return_input})
+                                  feed_dict={self.state_input: batch_state_input,
+                                             self.return_input: batch_return_input})
         else:
             print("ERROR: batch_size == 0", batch_size, len(replay_states))
 
@@ -389,8 +382,6 @@ class ActorCriticLearner:
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
             advantage_vectors.append(advantage_vector)
             for e in range(len(episode_states)):
-                # if episode_rewards[e] != 1.0:
-                #     print("YES:", episode_rewards[e], episode_states[e], episode_next_states[e], episode_actions[e])
                 state_action_history.append(
                     [episode_states[e], episode_actions[e], episode_next_states[e], episode_rewards[e]])
             latest_rewards.append(episode_total_reward)
@@ -469,9 +460,12 @@ class ActorCriticLearner:
             training_data = np.array(all_experience)
             if len(training_data) >= 1000:
                 print("Training size:", len(training_data))
+                test_data_r = np.load('cartpole_data/random_agent/testing_data.npy')
+                test_data_ac = np.load('cartpole_data/actor_critic/testing_data.npy')
                 self.transition_model = model_based_learner.TF_Transition_model(self.env, display_step=500)
                 acc1, acc2 = self.transition_model.train(training_epochs=3000, learning_rate=0.0005,
-                                                         training_data=training_data, logger=False)
+                                                         training_data=training_data, test_data_r=test_data_r,
+                                                         test_data_ac=test_data_ac, logger=False)
                 self.actor.transition_model = self.transition_model
 
                 # Doing imagination episodes if test error is less than a threshold
@@ -490,8 +484,6 @@ class ActorCriticLearner:
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
             advantage_vectors.append(advantage_vector)
             for e in range(len(episode_states)):
-                # if episode_rewards[e] != 1.0:
-                #     print("YES:", episode_rewards[e], episode_states[e], episode_next_states[e], episode_actions[e])
                 state_action_history.append(
                     [episode_states[e], episode_actions[e], episode_next_states[e], episode_rewards[e]])
             latest_rewards.append(episode_total_reward)

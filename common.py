@@ -1,6 +1,12 @@
 import numpy as np
 
 
+def get_n_action(n):
+    if n <= 2:
+        return 1
+    return n
+
+
 def reward_function(state):
     # True reward function for CartPole TODO fix this into a reward function approximator?
     theta_threshold_radians = 12 * 2 * np.math.pi / 360
