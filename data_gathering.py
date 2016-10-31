@@ -4,7 +4,7 @@ import numpy as np
 import time
 
 
-def gather_data_random_agent(n_games, max_time_steps, env, save_path="cartpole_data/training_data.npy", save_data=True):
+def gather_data_random_agent(n_games, max_time_steps, env, save_path="lunarlander_data/training_data.npy", save_data=True):
     data = []
     for i in range(n_games):
         if i % 1000 == 0:
@@ -49,12 +49,16 @@ def gather_data_actor_critic(n_agents, max_episodes, max_time_steps, env, save_p
 
 if __name__ == '__main__':
     start_time = time.time()
-    env = gym.make('CartPole-v0')
+    env = gym.make('LunarLander-v2')
 
     # Random agent sampling
-    d = gather_data_random_agent(55000, 200, env,
-                                 save_path="cartpole_data/random_agent_testing_data.npy",
-                                 save_data=True)
+    d = gather_data_random_agent(5000, 1000, env,
+                                 save_path="lunarlander_data/testing_data.npy",
+                                 save_data=False)
+
+    # d = gather_data_actor_critic(20, 1000, 1000, env,
+    #                              save_path="lunarlander_data/testing_data.npy",
+    #                              save_data=False)
 
     # Actor critic sampling
     # d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data/actor_critic_testing_data.npy",

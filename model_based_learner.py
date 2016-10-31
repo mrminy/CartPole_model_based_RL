@@ -17,8 +17,8 @@ import common
 class TF_Reward_model:
     def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
-        self.max_reward = 1.0  # TODO replace with env.max_reward
-        self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Correct scaling based on env
+        self.max_reward = 1.0  # This is updated during the pre-processing
+        self.x_max = self.env.observation_space.low  # For correct scaling
         self.history_sampling_rate = history_sampling_rate
         self.w_init_limit = w_init_limit
         self.display_step = display_step
@@ -35,32 +35,35 @@ class TF_Reward_model:
         self.saver = None
 
         # Network Parameters
-        self.n_action = self.env.action_space.n
+        if self.env.action_space.n <= 2:
+            self.n_action = 1
+        else:
+            self.n_action = self.env.action_space.n
         self.state_space = self.env.observation_space.shape[0]
-        self.n_input = self.env.observation_space.shape[0] + self.env.action_space.n  # State + action
-        self.n_output = 1  # Predicted next state
+        self.n_input = self.env.observation_space.shape[0] + self.n_action  # State + action
+        self.n_output = 1  # Predicted reward
         self.n_hidden_1 = 20  # 1st layer num features
         self.n_hidden_2 = 20  # 2nd layer num features
 
         self.cost_history = []
         self.test_acc_history = []
 
-    def predict(self, curr_state, action):
+    def predict(self, curr_state, action_conv):
         """
         :param curr_state: the current state of the environment
         :param action: the selected action to take for this state
         :return: the predicted next state
         """
-        assert len(curr_state) == self.n_input
         state_representation = np.array(curr_state)
         state_representation /= self.max_reward
         # Keep prob can be reduced a bit to generate uncertainty in model
         transition_prediction = self.sess.run(self.y_pred,
-                                              feed_dict={self.X: [state_representation], self.X_action: [[action]],
+                                              feed_dict={self.X: [state_representation], self.X_action: [action_conv],
                                                          self.keep_prob: 1.0})
 
         # Returning the predicted transition (next state) rescaled back to normal
-        return transition_prediction[0] * self.max_reward
+        reward = transition_prediction[0] * self.max_reward
+        return reward[0]
 
     def restore_model(self, restore_path='reward_model/tf_reward_model.ckpt'):
         self.build_model()
@@ -68,7 +71,7 @@ class TF_Reward_model:
         print("Model restored from file: %s" % restore_path)
 
     def build_model(self, learning_rate=0.001):
-        print("Building graph...")
+        print("Building reward graph...")
         with self.graph.as_default():
             # Encode curr_state, add transition prediction with selected action and decode to predicted output state
             self.X = tf.placeholder("float", [None, self.state_space])  # current state input
@@ -83,17 +86,23 @@ class TF_Reward_model:
                 'h2': tf.Variable(
                     tf.random_uniform([self.n_hidden_1, self.n_hidden_2], minval=self.w_init_limit[0],
                                       maxval=self.w_init_limit[1])),
+                'out': tf.Variable(
+                    tf.random_uniform([self.n_hidden_2, self.n_output], minval=self.w_init_limit[0],
+                                      maxval=self.w_init_limit[1])),
             }
             biases = {
                 'b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
                 'b2': tf.Variable(tf.random_normal([self.n_hidden_2])),
+                'bout': tf.Variable(tf.random_normal([self.n_output])),
             }
 
             input = tf.concat(1, [self.X, self.X_action])
             layer_1 = tf.nn.tanh(tf.add(tf.matmul(input, weights['h1']), biases['b1']))
             layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
             layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1_drop, weights['h2']), biases['b2']))
-            out = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
+            layer_2_drop = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
+            out = tf.nn.tanh(tf.add(tf.matmul(layer_2_drop, weights['out']), biases['bout']))
+            out = tf.nn.dropout(out, self.keep_prob)  # Dropout layer
 
             # Prediction
             self.y_pred = out
@@ -133,7 +142,7 @@ class TF_Reward_model:
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
         if logger:
             print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=200000)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(testing_data_random_agent)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(testing_data_actor_critic)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -205,7 +214,7 @@ class TF_Reward_model:
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.max_reward, y / self.max_reward
+        return x / self.x_max, y / self.max_reward
 
     def preprocess_data(self, value, max_data=999999999):
         x = []
@@ -214,11 +223,18 @@ class TF_Reward_model:
         for d in value:
             if abs(d[3]) > self.max_reward:
                 self.max_reward = abs(d[3])
-
-            x.append(np.array(d[0]))  # State t and
-            ac = np.zeros(self.n_action)
-            ac[int(d[1])] = 1.0
-            x_action.append(ac)  # Action
+            for j in range(len(d[0])):
+                if abs(d[0][j]) > self.x_max[j]:
+                    self.x_max[j] = abs(d[0][j])
+                if abs(d[2][j]) > self.x_max[j]:
+                    self.x_max[j] = abs(d[2][j])
+            x.append(np.array(d[2]))  # Next state (t+1)
+            if self.n_action > 1:
+                ac = np.zeros(self.n_action)
+                ac[int(d[1])] = 1.0
+                x_action.append(ac)  # Action
+            else:
+                x_action.append([d[1]])
             y.append(np.array([d[3]]))  # Reward
             if len(y) >= max_data:
                 break
@@ -230,10 +246,12 @@ class TF_Transition_model:
     def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.graph = tf.Graph()
-        self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Correct scaling based on env
+        # self.input_scale = input_scale  # [4.8, 4.0, 0.418879020479, 4.0]  # Correct scaling based on CartPole
         # self.input_scale = [2.5, 3.58683067, 0.28, 3.69079514]  # TODO make this not fixed
         # self.input_scale = [2.46059875, 3.58683067, 0.27366452, 3.69079514] # Scaling for random agent
         # self.input_scale = [2.46059875, 3.519398, 0.27262908, 3.45911401]  # Scaling for actor critic
+        self.reward_model = TF_Reward_model(env, history_sampling_rate=history_sampling_rate, w_init_limit=w_init_limit,
+                                            display_step=display_step)
 
         # Training parameters
         self.display_step = display_step
@@ -250,7 +268,10 @@ class TF_Transition_model:
 
         # Network Parameters
         self.n_input = self.env.observation_space.shape[0]  # Prev state
-        self.n_action = 1  # Action # TODO add support for changing action space self.env.action_space.n (for now --> binary)
+        if self.env.action_space.n <= 2:
+            self.n_action = 1
+        else:
+            self.n_action = self.env.action_space.n
         self.n_output = self.n_input  # Predicted next state
         self.n_hidden_1 = 20  # 1st layer num features
         self.n_hidden_2 = 20  # 2nd layer num features
@@ -268,15 +289,28 @@ class TF_Transition_model:
         """
         assert len(curr_state) == self.n_input
         state_representation = np.array(curr_state)
-        state_representation /= self.input_scale
+        state_representation /= self.x_max
+
+        if self.env.action_space.n <= 2:
+            action_conv = [action]  # Action
+        else:
+            action_conv = np.zeros(self.env.action_space.n)
+            action_conv[action] = 1.0
+
         # Keep prob can be reduced a bit to generate uncertainty in model
         transition_prediction = self.sess.run(self.y_pred,
-                                              feed_dict={self.X: [state_representation], self.X_action: [[action]],
+                                              feed_dict={self.X: [state_representation], self.X_action: [action_conv],
                                                          self.keep_prob: 1.0})
 
         # Returning the predicted transition (next state) rescaled back to normal
-        next_state = transition_prediction[0] * self.input_scale
-        reward, done = common.reward_function(next_state)
+        next_state = transition_prediction[0] * self.x_max
+        reward = self.reward_model.predict(next_state, action_conv)
+
+        # TODO make done model as well
+        if abs(next_state[0]) == 0:
+            done = True
+        else:
+            done = False
         return next_state, reward, done, None
 
     def restore_model(self, restore_path='transition_model/tf_transition_model.ckpt'):
@@ -285,7 +319,7 @@ class TF_Transition_model:
         print("Model restored from file: %s" % restore_path)
 
     def build_model(self, learning_rate=0.001):
-        print("Building graph...")
+        print("Building transition graph...")
         with self.graph.as_default():
             # Encode curr_state, add transition prediction with selected action and decode to predicted output state
             self.X = tf.placeholder("float", [None, self.n_input])  # current state input
@@ -373,7 +407,7 @@ class TF_Transition_model:
 
             # Evaluate model
             # correct_pred = tf.equal(self.y_pred, y_true)
-            correct_pred = tf.pow(((y_true - self.y_pred) * self.input_scale), 2)
+            correct_pred = tf.pow(((y_true - self.y_pred) * self.x_max), 2)
             self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
             # Creates a saver
@@ -399,6 +433,7 @@ class TF_Transition_model:
             training_data = training_data
         testing_data_random_agent = np.load('cartpole_data/random_agent/testing_data.npy')
         testing_data_actor_critic = np.load('cartpole_data/actor_critic/testing_data.npy')
+        self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data, logger=logger)
         if logger:
             print("Preprocessing data...")
         X_train, X_train_action, Y_train = self.preprocess_data(training_data)
@@ -469,8 +504,8 @@ class TF_Transition_model:
         encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
                                                               self.X_action: X_test_action_r[:self.examples_to_show],
                                                               self.keep_prob: 1.0})
-        print(Y_test_r[:self.examples_to_show] * self.input_scale)
-        print(encode_decode[:] * self.input_scale)
+        print(Y_test_r[:self.examples_to_show] * self.x_max)
+        print(encode_decode[:] * self.x_max)
 
         if save:
             save_path = self.saver.save(self.sess, save_path)
@@ -493,7 +528,7 @@ class TF_Transition_model:
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.input_scale, y / self.input_scale
+        return x / self.x_max, y / self.x_max
 
     def preprocess_data(self, value, max_data=10000):
         x = []
@@ -507,7 +542,12 @@ class TF_Transition_model:
                     self.x_max[j] = abs(d[2][j])
 
             x.append(np.array(d[0]))  # State t (and scale)
-            x_action.append([d[1]])  # Action
+            if self.env.action_space.n <= 2:
+                x_action.append([d[1]])  # Action
+            else:
+                action_conv = np.zeros(self.env.action_space.n)
+                action_conv[d[1]] = 1.0
+                x_action.append(action_conv)
             y.append(np.array(d[2]))  # State t+1 (and scale)
             if len(y) >= max_data:
                 break
@@ -534,6 +574,6 @@ if __name__ == '__main__':
 
     # Reward model
     model = TF_Reward_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    model.train(training_epochs=5, learning_rate=0.001, logger=True,
+    model.train(training_epochs=3000, learning_rate=0.001, logger=True,
                 train_data_path='cartpole_data/random_agent/training_data.npy', save=False,
                 save_path="new_transition_model/transition_model.ckpt")

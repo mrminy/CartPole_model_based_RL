@@ -299,16 +299,18 @@ class Critic:
         batch_size = self.batch_size
         if np.ma.size(replay_states) < batch_size:
             batch_size = np.ma.size(replay_states)
-
-        for epoch in range(self.num_epochs):
-            total_batch = int(np.ma.size(replay_states) / batch_size)
-            # Loop over all batches
-            for i in range(total_batch):
-                batch_state_input, batch_return_input = self.get_next_batch(batch_size, replay_states,
-                                                                            replay_return_from_states)
-                # Fit training data using batch
-                self.sess.run(self.optim,
-                              feed_dict={self.state_input: batch_state_input, self.return_input: batch_return_input})
+        if batch_size != 0:
+            for epoch in range(self.num_epochs):
+                total_batch = int(np.ma.size(replay_states) / batch_size)
+                # Loop over all batches
+                for i in range(total_batch):
+                    batch_state_input, batch_return_input = self.get_next_batch(batch_size, replay_states,
+                                                                                replay_return_from_states)
+                    # Fit training data using batch
+                    self.sess.run(self.optim,
+                                  feed_dict={self.state_input: batch_state_input, self.return_input: batch_return_input})
+        else:
+            print("ERROR: batch_size == 0", batch_size, len(replay_states))
 
     def get_advantage_vector(self, states, rewards, next_states):
         """Returns TD(0) Advantage for particular state and action"""
@@ -407,7 +409,7 @@ class ActorCriticLearner:
                 else:
                     update = True
 
-                if update and sum_reward > 2:
+                if update:
                     if logger:
                         print("Updating")
                     self.actor.update_policy(advantage_vectors)
@@ -432,12 +434,19 @@ class ActorCriticLearner:
     def gather_random_data(self, n_steps=1000):
         global all_experience
         total_steps = 0
+        input_scale = []
         while True:
             state = self.env.reset()
+            input_scale = state
             for time_step in range(self.max_episodes):
                 action = np.random.choice(self.env.action_space.n)
                 next_state, reward, done, info = self.env.step(action)
                 all_experience.append([state, action, next_state, reward])
+                for i in range(len(state)):
+                    if state[i] > input_scale[i]:
+                        input_scale[i] = state[i]
+                    if next_state[i] > input_scale[i]:
+                        input_scale[i] = next_state[i]
                 state = next_state
                 total_steps += 1
 
@@ -445,6 +454,7 @@ class ActorCriticLearner:
                     break
             if total_steps >= n_steps:
                 break
+        return input_scale
 
     def learn(self, max_env_time_steps, goal_avg_score, learning_rate=0.01, imagination_learning_rate=0.0001):
         self.actor.imagination_learning_rate = imagination_learning_rate
@@ -452,7 +462,7 @@ class ActorCriticLearner:
 
         if self.n_pre_training_epochs != 0:
             # Gathering data for imagination rollouts
-            self.gather_random_data(1000)
+            input_scale = self.gather_random_data(1000)
 
             # Train transition model on gathered data and pre-train actor-critic from imagination rollouts
             global all_experience
