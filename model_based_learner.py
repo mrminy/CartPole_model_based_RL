@@ -15,9 +15,10 @@ import common
 
 
 class TF_Reward_model:
-    def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
+    def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.max_reward = 1.0  # This is updated during the pre-processing
+        self.input_scale = input_scale
         self.x_max = self.env.observation_space.low  # For correct scaling
         self.history_sampling_rate = history_sampling_rate
         self.w_init_limit = w_init_limit
@@ -202,7 +203,7 @@ class TF_Reward_model:
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.x_max, y / self.max_reward
+        return x / self.input_scale, y / self.max_reward
 
     def preprocess_data(self, value, max_data=999999999):
         x = []
@@ -277,7 +278,7 @@ class TF_Transition_model:
         """
         assert len(curr_state) == self.n_input
         state_representation = np.array(curr_state)
-        state_representation /= self.x_max
+        state_representation /= self.input_scale
 
         if self.env.action_space.n <= 2:
             action_conv = [action]  # Binary action input
@@ -291,14 +292,9 @@ class TF_Transition_model:
                                                          self.keep_prob: 1.0})
 
         # Returning the predicted transition (next state) rescaled back to normal
-        next_state = transition_prediction[0] * self.x_max
+        next_state = transition_prediction[0] * self.input_scale
         # reward = self.reward_model.predict(curr_state, action_conv)
         reward, done = common.reward_function(curr_state)
-
-        if reward == 0.0:
-            done = True
-        else:
-            done = False
         return next_state, reward, done, None
 
     def restore_model(self, restore_path='transition_model/tf_transition_model.ckpt'):
@@ -395,7 +391,7 @@ class TF_Transition_model:
 
             # Evaluate model
             # correct_pred = tf.equal(self.y_pred, y_true)
-            correct_pred = tf.pow(((y_true - self.y_pred) * self.x_max), 2)
+            correct_pred = tf.pow(((y_true - self.y_pred) * self.input_scale), 2)
             self.accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
             # Creates a saver
@@ -487,8 +483,8 @@ class TF_Transition_model:
         encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
                                                               self.X_action: X_test_action_r[:self.examples_to_show],
                                                               self.keep_prob: 1.0})
-        print(Y_test_r[:self.examples_to_show] * self.x_max)
-        print(encode_decode[:] * self.x_max)
+        print(Y_test_r[:self.examples_to_show] * self.input_scale)
+        print(encode_decode[:] * self.input_scale)
 
         if save:
             save_path = self.saver.save(self.sess, save_path)
@@ -508,15 +504,15 @@ class TF_Transition_model:
             # plt.axis([0, len(self.cost_history), 0, np.max(y_axis) * 1.1])
             plt.show()
 
-        np.savetxt("cost.csv", self.cost_history, delimiter=",")
-        np.savetxt("acc.csv", self.test_acc_history, delimiter=",")
+        # np.savetxt("cost.csv", self.cost_history, delimiter=",")
+        # np.savetxt("acc.csv", self.test_acc_history, delimiter=",")
 
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.x_max, y / self.x_max
+        return x / self.input_scale, y / self.input_scale
 
-    def preprocess_data(self, value, max_data=10000):
+    def preprocess_data(self, value, max_data=999999999):
         x = []
         x_action = []
         y = []
@@ -557,7 +553,7 @@ if __name__ == '__main__':
 
     # # Current best is no dropout, not regularization, no scaling in loss-function
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    model.train(training_epochs=3000, learning_rate=0.0005, training_data=training_data[:1000], test_data_r=test_data_r,
+    model.train(training_epochs=15, learning_rate=0.0005, training_data=training_data[:200000], test_data_r=test_data_r,
                 test_data_ac=test_data_ac, save=False,
                 save_path="new_transition_model/transition_model.ckpt")
 

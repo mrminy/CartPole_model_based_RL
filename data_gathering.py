@@ -1,4 +1,4 @@
-from my_actor_critic import ActorCriticLearner
+# from my_actor_critic import ActorCriticLearner
 import gym
 import numpy as np
 import time
@@ -52,9 +52,9 @@ if __name__ == '__main__':
     env = gym.make('LunarLander-v2')
 
     # Random agent sampling
-    d = gather_data_random_agent(5000, 1000, env,
-                                 save_path="lunarlander_data/testing_data.npy",
-                                 save_data=False)
+    d = gather_data_random_agent(10000, 1000, env,
+                                 save_path="lunarlander_data/training_data.npy",
+                                 save_data=True)
 
     # d = gather_data_actor_critic(20, 1000, 1000, env,
     #                              save_path="lunarlander_data/testing_data.npy",
