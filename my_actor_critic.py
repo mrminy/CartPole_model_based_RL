@@ -35,7 +35,7 @@ class Actor:
         # Build the graph when instantiated
         with self.graph.as_default():
             tf.set_random_seed(1234)
-            self.weights = tf.Variable(tf.random_normal([len(self.observation_space.high), self.action_space_n]))
+            self.weights = tf.Variable(tf.random_normal([len(self.observation_space.high), self.action_space_n]), name='weights')
             self.biases = tf.Variable(tf.random_normal([self.action_space_n]))
 
             # Neural Network inputs
@@ -44,15 +44,17 @@ class Actor:
             self.y = tf.placeholder("float")  # Advantage input
             self.action_input = tf.placeholder("float", [None,
                                                          self.action_space_n])  # Input action to return the probability associated with that action
+            loss_const = tf.constant(0.0001)
 
             # Current policy is a simple softmax policy since actions are discrete in this environment
             self.policy = self.softmax_policy(self.x, self.weights, self.biases)  # Softmax policy
             # The following are derived directly from the formula for gradient of policy
-            self.log_action_probability = tf.reduce_sum(self.action_input * tf.log(self.policy))
+            self.log_action_probability = tf.reduce_sum(self.action_input * tf.log(self.policy + loss_const))
             self.loss = -self.log_action_probability * self.y  # Loss is score function times advantage
             # Use Adam Optimizer to optimize
 
             self.optim = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+            # self.optim = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
             # Initializing all variables
             self.init = tf.initialize_all_variables()
             print("Policy Graph Constructed")
@@ -171,6 +173,7 @@ class Actor:
         """Updates the policy weights by running gradient descent on one state at a time"""
         global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states
 
+        errors = []
         for i in range(len(replay_states)):
             states = replay_states[i]
             actions = replay_actions[i]
@@ -181,9 +184,12 @@ class Actor:
                 state = np.asarray(states[j])
                 state = state.reshape(1, len(self.observation_space.high))
 
-                _, error_value = self.sess.run([self.optim, self.loss],
+                o, error_value = self.sess.run([self.optim, self.loss],
                                                feed_dict={self.x: state, self.action_input: action,
                                                           self.y: advantage_vector[j]})
+                errors.append(error_value)
+        # print("E:", errors)
+        # print("AV:", advantage_vectors)
 
     def softmax_policy(self, state, weights, biases):
         """Defines softmax policy for tf graph"""
@@ -195,10 +201,20 @@ class Actor:
         state = np.asarray(state)
         state = state.reshape(1, len(self.observation_space.high))
         softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
+
+        # print("2", state)
+        # if random.random() < 0.01:
+        #     print("3", softmax_out)
+        # if random.random() < 0.01:
+        #     print("4.5", self.sess.run(self.weights))
+        if np.math.isnan(softmax_out[0][0]):
+            self.sess.close()
+            exit()
         if explore:
             # Sample action from prob density
-            # action = np.random.choice(np.arange(max(2, self.action_space_n)), 1, replace=True, p=softmax_out[0])[0]
-            action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
+            action = np.random.choice(np.arange(max(2, self.action_space_n)), 1, replace=True, p=softmax_out[0])[0]
+            # print(action, softmax_out)
+            # action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
         else:
             # Follow optimal policy (argmax)
             action = np.argmax(softmax_out[0])
