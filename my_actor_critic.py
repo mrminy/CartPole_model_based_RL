@@ -44,7 +44,7 @@ class Actor:
             self.y = tf.placeholder("float")  # Advantage input
             self.action_input = tf.placeholder("float", [None,
                                                          self.action_space_n])  # Input action to return the probability associated with that action
-            loss_const = tf.constant(0.0001)
+            loss_const = tf.constant(0.000001)
 
             # Current policy is a simple softmax policy since actions are discrete in this environment
             self.policy = self.softmax_policy(self.x, self.weights, self.biases)  # Softmax policy
@@ -173,7 +173,6 @@ class Actor:
         """Updates the policy weights by running gradient descent on one state at a time"""
         global replay_states, replay_actions, replay_rewards, replay_next_states, replay_return_from_states
 
-        errors = []
         for i in range(len(replay_states)):
             states = replay_states[i]
             actions = replay_actions[i]
@@ -187,9 +186,6 @@ class Actor:
                 o, error_value = self.sess.run([self.optim, self.loss],
                                                feed_dict={self.x: state, self.action_input: action,
                                                           self.y: advantage_vector[j]})
-                errors.append(error_value)
-        # print("E:", errors)
-        # print("AV:", advantage_vectors)
 
     def softmax_policy(self, state, weights, biases):
         """Defines softmax policy for tf graph"""
