@@ -16,12 +16,12 @@ from my_actor_critic import ActorCriticLearner
 
 def main():
     w_game_gui = True
-    gym_name = 'LunarLander-v2'
+    gym_name = 'CartPole-v0'
     action_uncertainty = 0.0  # 4/10 when 0.3 solved. 0/10 when 0.4
     n_pre_training_episodes = 0
     n_rollout_epochs = 0  # Disabled for now..
-    n_agents = 10  # Train n different agents
-    learning_rate = 0.001
+    n_agents = 50  # Train n different agents
+    learning_rate = 0.01
     pre_training_learning_rate = 0.001
     full_state_action_history = []
     end_episode = []
@@ -37,7 +37,7 @@ def main():
         if w_game_gui:
             env.monitor.start('./' + gym_name + '-pg-experiment', force=True)
         # Learning Parameters
-        max_episodes = 20000
+        max_episodes = 1000
         episodes_before_update = 2
         discount = 0.85
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_episodes,
@@ -59,6 +59,7 @@ def main():
     print("Std:", np.std(end_episode))
     print("Best:", np.min(end_episode))
 
+    np.savetxt("end_episode.csv", np.asarray(end_episode), delimiter=",")
     np.savetxt("timesteps.csv", np.asarray(step_history), delimiter=",")
     np.savetxt("rewards.csv", np.asarray(reward_history), delimiter=",")
 

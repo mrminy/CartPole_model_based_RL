@@ -44,7 +44,7 @@ class Actor:
             self.y = tf.placeholder("float")  # Advantage input
             self.action_input = tf.placeholder("float", [None,
                                                          self.action_space_n])  # Input action to return the probability associated with that action
-            loss_const = tf.constant(0.0001)
+            loss_const = tf.constant(0.00001)
 
             # Current policy is a simple softmax policy since actions are discrete in this environment
             self.policy = self.softmax_policy(self.x, self.weights, self.biases)  # Softmax policy
@@ -369,6 +369,7 @@ class ActorCriticLearner:
                            discount=discount, learning_rate=0.01)
         self.critic = Critic(self.env, discount)
         self.last_episode = 0
+        self.solved = False
         self.logger = logger
         self.n_pre_training_epochs = n_pre_training_epochs
         self.n_rollout_epochs = n_rollout_epochs
@@ -495,7 +496,8 @@ class ActorCriticLearner:
         update = True
 
         for i in range(self.max_episodes):
-            self.last_episode = i
+            if not self.solved:
+                self.last_episode = int(i)
             episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.rollout_policy(
                 max_env_time_steps, update)
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
@@ -530,13 +532,16 @@ class ActorCriticLearner:
                 self.actor.reset_memory()
                 sum_reward = 0
 
-                avg_rew = sum(latest_rewards) / float(len(latest_rewards))
+                if not self.solved:
+                    avg_rew = sum(latest_rewards) / float(len(latest_rewards))
                 if self.logger:
                     print("Episode:", i, " - AVG:", avg_rew)
                 if avg_rew >= goal_avg_score and len(latest_rewards) >= 100:
+                    self.solved = True
+                    print("solved!!!", self.last_episode)
                     if self.logger:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
-                    break
+                    #break
 
                     # Trying with full imagination rollouts for each episode
                     # self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)
