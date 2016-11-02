@@ -8,7 +8,7 @@ def get_n_action(n):
 
 
 def reward_function(state):
-    # True reward function for CartPole TODO fix this into a reward function approximator?
+    # True reward function for CartPole
     theta_threshold_radians = 12 * 2 * np.math.pi / 360
     x_threshold = 2.4
     done = state[0] < -x_threshold or state[0] > x_threshold or state[2] < -theta_threshold_radians or state[

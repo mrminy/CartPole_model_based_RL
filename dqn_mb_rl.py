@@ -13,11 +13,13 @@ gamma = 0.99
 num_between_q_copies = 150
 explore_decay = 0.9995  # Exploration decay per step
 min_explore = 0.01
-max_steps = 200
-reward_goal = 195
-memory_size = 100000
-learning_rate = 0.001
+max_steps = 1000
+reward_goal = 200
+memory_size = 1000000
+learning_rate = 0.008
+w_game_gui = True
 
+n_imagination_rollouts = 0
 
 class DQN:
     def __init__(self, env):
@@ -25,8 +27,8 @@ class DQN:
         self.env = env
 
         self.transition_model = TF_Transition_model(env)
-        self.transition_model.restore_model(
-            restore_path='new_transition_model/random_agent_1000/transition_model.ckpt')
+        # self.transition_model.restore_model(
+        #     restore_path='new_transition_model/random_agent_1000/transition_model.ckpt')
 
         self.graph = tf.Graph()
         self.all_assigns = None
@@ -112,6 +114,9 @@ class DQN:
         episode = 0
         last_reward_sum = 0
 
+        if w_game_gui:
+            self.env.monitor.start('./' + self.env.spec.id + '-pg-experiment', force=True)
+
         with tf.Session() as sess:
             sess.run(self.init)
             sess.run(self.all_assigns)
@@ -184,7 +189,7 @@ class DQN:
                             sess.run(self.all_assigns)
 
                 # Do imagination rollouts
-                for r in range(1):
+                for r in range(n_imagination_rollouts):
                     if im_rollouts and len(self.D) < memory_size:
                         # Choose random action for imagination rollouts
                         im_done = False
@@ -199,11 +204,11 @@ class DQN:
                                 self.D.pop(0)
                             im_state = im_new_state
 
-                    last_reward_sum = reward_sum
-                    reward_list.append(reward_sum)
-                    recent_rewards.append(reward_sum)
-                    if len(recent_rewards) > 100:
-                        recent_rewards.pop(0)
+                last_reward_sum = reward_sum
+                reward_list.append(reward_sum)
+                recent_rewards.append(reward_sum)
+                if len(recent_rewards) > 100:
+                    recent_rewards.pop(0)
 
                 mean = 0.0
                 if len(recent_rewards) > 0:
@@ -307,7 +312,7 @@ class DQN:
                 print('Pre-learning --> Reward for episode %d is %d. Explore is %.4f. Avg is %.3f' % (
                     episode, reward_sum, explore, mean))
 
-            if mean >= 195 and len(recent_rewards) >= 100:
+            if mean >= reward_goal and len(recent_rewards) >= 100:
                 break
 
                 # Clear ER for real and correct episodes
@@ -317,11 +322,11 @@ class DQN:
 
 if __name__ == '__main__':
     results = []
-    for i in range(10):
+    for i in range(1):
         print("Agent nr:", i)
-        dqn = DQN(gym.make('CartPole-v0'))
+        dqn = DQN(gym.make('LunarLander-v2'))
         results.append(
-            dqn.train(max_episodes=1000, pre_learning_episodes=100, im_rollouts=True, logger=True))
+            dqn.train(max_episodes=10000, pre_learning_episodes=0, im_rollouts=False, logger=True))
     print(results)
     results = np.array(results)
     print("Avg:", np.mean(results))
