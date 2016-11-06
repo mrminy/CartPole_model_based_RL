@@ -9,6 +9,15 @@ import numpy as np
 def show_space_utilization(data):
     pass
 
+def convert_reward_data(d):
+    out = []
+    for game in d:
+        g = []
+        for val in game:
+            if val != 0 and len(g) < 1000:
+                g.append(val)
+        out.append(g)
+    return out
 
 def get_min_max(states):
     print(len(states))
@@ -23,5 +32,10 @@ def get_min_max(states):
     return s_max, s_min
 
 
-data = np.load('lunarlander_data/random_agent/testing_data.npy')
-pprint.PrettyPrinter(indent=4).pprint(get_min_max(data[:, 0]))
+data = np.load('timesteps.npy')
+print(data)
+conv_data = convert_reward_data(data)
+print(conv_data)
+conv_data = np.array(conv_data)
+np.savetxt("timesteps.csv", conv_data, delimiter=",")
+# pprint.PrettyPrinter(indent=4).pprint(get_min_max(data[:, 0]))
