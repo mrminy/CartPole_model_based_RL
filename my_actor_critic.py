@@ -76,6 +76,8 @@ class Actor:
         episode_next_states = []
         episode_return_from_states = []
 
+        history = []
+
         for time in range(timeSteps):
             # Choose selected_action based on current policy
             selected_action, executed_action = self.choose_action(curr_state, explore)
@@ -84,6 +86,8 @@ class Actor:
             next_state, reward, done, info = self.env.step(executed_action)
             # Update the total reward
             total_reward += reward
+
+            history.append([curr_state, selected_action, next_state, reward, done])
 
             if done or time >= self.env.spec.timestep_limit:
                 # Skip training when done or time-step is above the limit of the env
@@ -116,7 +120,7 @@ class Actor:
         # Update the global replay memory
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
                            episode_return_from_states, True)
-        return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
+        return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward, history
 
     def perform_imagination_rollouts(self, time_steps, start_state):
         """Rollout policy for one episode, update the replay memory and return total reward"""
@@ -454,9 +458,7 @@ class ActorCriticLearner:
             for time_step in range(self.max_episodes):
                 action = np.random.choice(self.env.action_space.n)
                 next_state, reward, done, info = self.env.step(action)
-                if done:
-                    reward = 0.0
-                all_experience.append([state, action, next_state, reward])
+                all_experience.append([state, action, next_state, reward, done])
                 for i in range(len(state)):
                     if state[i] > input_scale[i]:
                         input_scale[i] = state[i]
@@ -475,7 +477,7 @@ class ActorCriticLearner:
         self.actor.imagination_learning_rate = imagination_learning_rate
         self.actor.learning_rate = learning_rate
 
-        if self.n_pre_training_epochs != 0:
+        if self.n_pre_training_epochs > 0:
             # Gathering data for imagination rollouts
             gathered_data_size = 600
             input_scale = self.gather_random_data(gathered_data_size)
@@ -485,8 +487,8 @@ class ActorCriticLearner:
             training_data = np.array(all_experience)
             if len(training_data) >= gathered_data_size:
                 print("Training size:", len(training_data))
-                test_data_r = np.load('cartpole_data/random_agent/testing_data.npy')
-                test_data_ac = np.load('cartpole_data/actor_critic/testing_data.npy')
+                test_data_r = np.load('cartpole_data_done/random_agent/testing_data.npy')
+                test_data_ac = np.load('cartpole_data_done/actor_critic/testing_data.npy')
                 self.transition_model = model_based_learner.TF_Transition_model(self.env, display_step=500)
                 acc1, acc2 = self.transition_model.train(training_epochs=3000, learning_rate=0.0005,
                                                          training_data=training_data, test_data_r=test_data_r,
@@ -505,13 +507,11 @@ class ActorCriticLearner:
         for i in range(self.max_episodes):
             if not self.solved:
                 self.last_episode = int(i)
-            episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward = self.actor.rollout_policy(
+            episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, episode_total_reward, history = self.actor.rollout_policy(
                 max_env_time_steps, update)
             advantage_vector = self.critic.get_advantage_vector(episode_states, episode_rewards, episode_next_states)
             advantage_vectors.append(advantage_vector)
-            for e in range(len(episode_states)):
-                state_action_history.append(
-                    [episode_states[e], episode_actions[e], episode_next_states[e], episode_rewards[e]])
+            state_action_history.append(history)
             latest_rewards.append(episode_total_reward)
             if len(latest_rewards) > 100:
                 latest_rewards.pop(0)
@@ -548,7 +548,7 @@ class ActorCriticLearner:
                     print("solved!!!", self.last_episode)
                     if self.logger:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
-                    #break
+                    break
 
                     # Trying with full imagination rollouts for each episode
                     # self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)

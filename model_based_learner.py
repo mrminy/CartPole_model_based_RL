@@ -14,6 +14,214 @@ import matplotlib.pyplot as plt
 import common
 
 
+class TF_Done_model:
+    def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
+        self.env = env
+        self.input_scale = input_scale
+        self.x_max = self.env.observation_space.low  # For correct scaling
+        self.history_sampling_rate = history_sampling_rate
+        self.w_init_limit = w_init_limit
+        self.display_step = display_step
+        self.examples_to_show = 0
+
+        self.graph = tf.Graph()
+
+        # tf placeholders
+        self.X = None
+        self.Y = None
+        self.y_pred = None
+        self.sess = None
+        self.keep_prob = None  # for dropout
+        self.saver = None
+
+        # Network Parameters
+        self.state_space = self.env.observation_space.shape[0]
+        self.n_input = self.env.observation_space.shape[0]  # State
+        self.n_output = 1  # Done (1) or not done (0)
+        self.n_hidden_1 = 40  # 1st layer num features
+        self.n_hidden_2 = 40  # 2nd layer num features
+
+        self.cost_history = []
+        self.test_acc_history = []
+
+    def predict(self, curr_state, action_conv):
+        """
+        :param curr_state: the current state of the environment
+        :param action: the selected action to take for this state
+        :return: the predicted next state
+        """
+        state_representation = np.array(curr_state)
+        state_representation /= self.input_scale
+        # Keep prob can be reduced a bit to generate uncertainty in model
+        transition_prediction = self.sess.run(self.y_pred,
+                                              feed_dict={self.X: [state_representation], self.keep_prob: 1.0})
+
+        # Returning the predicted class [not done, done]
+        done_prediction = transition_prediction[0]
+        if done_prediction > 0.5:
+            return True
+        return False
+
+    def restore_model(self, restore_path='done_model/tf_done_model.ckpt'):
+        self.build_model()
+        self.saver.restore(self.sess, restore_path)
+        print("Model restored from file: %s" % restore_path)
+
+    def build_model(self, learning_rate=0.001):
+        print("Building done graph...")
+        with self.graph.as_default():
+            # Encode curr_state, add transition prediction with selected action and decode to predicted output state
+            self.X = tf.placeholder("float", [None, self.state_space])  # current state input
+            self.Y = tf.placeholder("float", [None, self.n_output])  # output
+            self.keep_prob = tf.placeholder(tf.float32)  # For dropout
+
+            weights = {
+                'h1': tf.Variable(
+                    tf.random_normal([self.n_input, self.n_hidden_1])),
+                'h2': tf.Variable(
+                    tf.random_normal([self.n_hidden_1, self.n_hidden_2])),
+                'out': tf.Variable(
+                    tf.random_normal([self.n_hidden_2, self.n_output])),
+            }
+            biases = {
+                'b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
+                'b2': tf.Variable(tf.random_normal([self.n_hidden_2])),
+                'bout': tf.Variable(tf.random_normal([self.n_output])),
+            }
+
+            layer_1 = tf.nn.tanh(tf.add(tf.matmul(self.X, weights['h1']), biases['b1']))
+            layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
+            layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1_drop, weights['h2']), biases['b2']))
+            layer_2_drop = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
+            out = tf.nn.tanh(tf.add(tf.matmul(layer_2_drop, weights['out']), biases['bout']))
+            out = tf.nn.dropout(out, self.keep_prob)  # Dropout layer
+            # out = tf.nn.softmax(out) # TODO do I need this?
+
+            # Prediction
+            self.y_pred = out
+            # Targets (Labels) are the input data.
+            y_true = self.Y
+
+            # Define loss, minimize the squared error (with or without scaling)
+            self.loss_function = tf.reduce_mean(tf.square(y_true - self.y_pred))
+            self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
+            # self.optimizer = tf.train.RMSPropOptimizer(learning_rate, momentum=0.01).minimize(self.loss_function)
+
+            # Evaluate model
+            self.accuracy = tf.reduce_mean(tf.cast(self.loss_function, tf.float32))
+
+            # Creates a saver
+            self.saver = tf.train.Saver()
+
+            # Initializing the variables
+            self.init = tf.initialize_all_variables()
+
+            # Launch the graph
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True
+            self.sess = tf.Session(graph=self.graph, config=config)
+            self.sess.run(self.init)
+
+    def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
+              save=False, training_data=None, test_data_r=None, test_data_ac=None,
+              save_path='done_model/tf_done_model.ckpt', logger=True, max_training_data=999999):
+        # Load and preprocess data
+        if logger:
+            print("Preprocessing data...")
+        X_train, Y_train = self.preprocess_data(training_data, max_data=max_training_data)
+        X_test_r, Y_test_r = self.preprocess_data(test_data_r)
+        X_test_a_c, Y_test_a_c = self.preprocess_data(test_data_ac)
+        X_train = self.scale_data(X_train, Y_train)
+        X_test_r = self.scale_data(X_test_r, Y_test_r)
+        X_test_a_c = self.scale_data(X_test_a_c, Y_test_a_c)
+
+        self.build_model(learning_rate=learning_rate)
+
+        total_batch = int(len(X_train) / batch_size)
+        if logger:
+            print("Starting training...")
+            print("Total nr of batches:", total_batch)
+        # Training cycle
+        for epoch in range(training_epochs):
+            # Loop over all batches
+            c = None
+            idexes = np.arange(len(X_train))
+            for i in range(total_batch):
+                idx = np.random.choice(idexes, batch_size, replace=True)
+                batch_xs = X_train[idx]
+                batch_ys = Y_train[idx]
+                # Run optimization op (backprop) and cost op (to get loss value)
+                _, c = self.sess.run([self.optimizer, self.loss_function],
+                                     feed_dict={self.X: batch_xs, self.Y: batch_ys, self.keep_prob: 1.0})
+                if i % self.history_sampling_rate == 0:
+                    self.cost_history.append(c)
+                    sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
+                    self.test_acc_history.append(self.sess.run(self.accuracy,
+                                                               feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                          self.Y: Y_test_r[sampled_indexes],
+                                                                          self.keep_prob: 1.0}))
+
+            # Display logs per epoch step
+            if epoch % self.display_step == 0 and c is not None:
+                test_error = self.sess.run(self.accuracy, feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                     self.Y: Y_test_r[sampled_indexes],
+                                                                     self.keep_prob: 1.0})
+                print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
+                      "{:.9f}".format(test_error))
+
+        acc_random_agent = self.sess.run(self.accuracy,
+                                         feed_dict={self.X: X_test_r, self.Y: Y_test_r,
+                                                    self.keep_prob: 1.0})
+        print("Final test error random agent:", acc_random_agent)
+        acc_actor_critic = self.sess.run(self.accuracy,
+                                         feed_dict={self.X: X_test_a_c, self.Y: Y_test_a_c, self.keep_prob: 1.0})
+        print("Final test error actor critic:", acc_actor_critic)
+
+        # Applying encode and decode over test set and show some examples
+        encode_decode = self.sess.run(self.y_pred,
+                                      feed_dict={self.X: X_test_r[:self.examples_to_show], self.keep_prob: 1.0})
+        print(Y_test_r[:self.examples_to_show])
+        print(encode_decode[:])
+
+        if save:
+            save_path = self.saver.save(self.sess, save_path)
+            print("Model saved in file: %s" % save_path)
+
+        if show_test_acc:
+            y_axis = np.array(self.test_acc_history)
+            plt.plot(y_axis)
+            plt.show()
+
+        if show_cost:
+            y_axis = np.array(self.cost_history)
+            plt.plot(y_axis)
+            plt.show()
+
+        return acc_random_agent, acc_actor_critic
+
+    def scale_data(self, x, y):
+        return x / self.input_scale
+
+    def preprocess_data(self, value, max_data=999999999):
+        x = []
+        y = []
+        for d in value:
+            for j in range(len(d[0])):
+                if abs(d[0][j]) > self.x_max[j]:
+                    self.x_max[j] = abs(d[0][j])
+                if abs(d[2][j]) > self.x_max[j]:
+                    self.x_max[j] = abs(d[2][j])
+            x.append(np.array(d[2]))  # TODO Next state (t+1) or current state t?
+            if d[4]:
+                y.append(np.array([1.]))  # Done
+            else:
+                y.append(np.array([0.]))
+            if len(y) >= max_data:
+                break
+        x, y = np.array(x), np.array(y)
+        return x, y
+
+
 class TF_Reward_model:
     def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
@@ -129,13 +337,13 @@ class TF_Reward_model:
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
               save=False, training_data=None, test_data_r=None, test_data_ac=None,
-              save_path='transition_model/tf_transition_model.ckpt', logger=True):
+              save_path='transition_model/tf_transition_model.ckpt', logger=True, max_training_data=99999999):
         self.training_epoch = 0
 
         # Load and preprocess data
         if logger:
             print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=1000)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=max_training_data)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(test_data_r)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(test_data_ac)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -253,6 +461,8 @@ class TF_Transition_model:
             self.input_scale = [4.8, 4.0, 0.418879020479, 4.0, 1.0, 1.0, 1.0, 1.0]  # Scaling for LunarLander TODO
         self.reward_model = TF_Reward_model(env, self.input_scale, history_sampling_rate=history_sampling_rate,
                                             w_init_limit=w_init_limit, display_step=display_step)
+        self.done_model = TF_Done_model(env, self.input_scale, history_sampling_rate=history_sampling_rate,
+                                        w_init_limit=w_init_limit, display_step=display_step)
 
         # Training parameters
         self.display_step = display_step
@@ -306,11 +516,8 @@ class TF_Transition_model:
         # Returning the predicted transition (next state) rescaled back to normal
         next_state = transition_prediction[0] * self.input_scale
         reward = self.reward_model.predict(next_state, action_conv)
-        reward = round(max(0.0, reward))
+        done = self.done_model.predict(next_state, action_conv)
         # TODO maybe round reward to 0 or 1 for cartpole?
-        done = False
-        if reward <= 0.5:
-            done = True
         # reward, done = common.reward_function(curr_state) # True reward function for CartPole
         return next_state, reward, done, None
 
@@ -425,16 +632,20 @@ class TF_Transition_model:
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
               save=False, training_data=None, test_data_r=None, test_data_ac=None,
-              save_path='transition_model/tf_transition_model.ckpt', logger=True):
+              save_path='transition_model/tf_transition_model.ckpt', logger=True, max_training_data=9999999):
 
         # Train reward model
         self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
                                 test_data_r=test_data_r, test_data_ac=test_data_ac,
                                 logger=logger)
+        # Train done model
+        self.done_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
+                              test_data_r=test_data_r, test_data_ac=test_data_ac,
+                              logger=logger)
 
         if logger:
             print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=max_training_data)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(test_data_r)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(test_data_ac)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -566,19 +777,24 @@ if __name__ == '__main__':
     """
     env = gym.make('CartPole-v0')
 
-    training_data = np.load('cartpole_data/random_agent/training_data.npy')
-    test_data_r = np.load('cartpole_data/random_agent/testing_data.npy')
-    test_data_ac = np.load('cartpole_data/actor_critic/testing_data.npy')
+    training_data = np.load('cartpole_data_done/random_agent/training_data.npy')
+    test_data_r = np.load('cartpole_data_done/random_agent/testing_data.npy')
+    test_data_ac = np.load('cartpole_data_done/actor_critic/testing_data.npy')
 
     # # Current best is no dropout, not regularization, no scaling in loss-function
-    # model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    # model.train(training_epochs=15, learning_rate=0.0005, training_data=training_data[:200000], test_data_r=test_data_r,
-    #             test_data_ac=test_data_ac, save=False,
-    #             save_path="new_transition_model/transition_model.ckpt")
-
+    model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+    model.train(training_epochs=15, learning_rate=0.0005, training_data=training_data, test_data_r=test_data_r,
+                test_data_ac=test_data_ac, save=False,
+                save_path="new_transition_model/transition_model.ckpt", max_training_data=1000)
 
     # Reward model
-    model = TF_Reward_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
+    # model = TF_Reward_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
+    # model.train(training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
+    #             training_epochs=3000, learning_rate=0.0005, logger=True, save=False, show_cost=True, show_test_acc=True,
+    #             save_path="new_transition_model/transition_model.ckpt", max_training_data=1000)
+
+    # Done model
+    model = TF_Done_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
     model.train(training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
                 training_epochs=3000, learning_rate=0.0005, logger=True, save=False, show_cost=True, show_test_acc=True,
-                save_path="new_transition_model/transition_model.ckpt")
+                max_training_data=1000)

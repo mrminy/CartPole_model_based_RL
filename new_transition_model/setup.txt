@@ -1,4 +1,0 @@
-these models are trained with 4 --> 64 --> 64 --> 128 --> 64 --> 64 --> 4
-                                     encoder  transition  decoder
-                                                +action
-Full data set (2.2 mill)

@@ -1,2 +1,0 @@
-model_checkpoint_path: "transition_model.ckpt"
-all_model_checkpoint_paths: "transition_model.ckpt"
