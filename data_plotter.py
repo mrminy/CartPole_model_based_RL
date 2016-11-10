@@ -9,6 +9,7 @@ import numpy as np
 def show_space_utilization(data):
     pass
 
+
 def convert_reward_data(d):
     out = []
     for game in d:
@@ -18,6 +19,7 @@ def convert_reward_data(d):
                 g.append(val)
         out.append(g)
     return out
+
 
 def get_min_max(states):
     print(len(states))
@@ -31,6 +33,13 @@ def get_min_max(states):
                 s_min[i] = s[i]
     return s_max, s_min
 
+
+data = np.load('rewards.npy')
+print(data)
+conv_data = convert_reward_data(data)
+print(conv_data)
+conv_data = np.array(conv_data)
+np.savetxt("rewards.csv", conv_data, delimiter=",")
 
 data = np.load('timesteps.npy')
 print(data)

@@ -23,6 +23,8 @@ class TF_Reward_model:
         self.history_sampling_rate = history_sampling_rate
         self.w_init_limit = w_init_limit
         self.display_step = display_step
+        self.examples_to_show = 13
+        self.training_epoch = 0
 
         self.graph = tf.Graph()
 
@@ -38,10 +40,10 @@ class TF_Reward_model:
         # Network Parameters
         self.n_action = common.get_n_action(self.env.action_space.n)
         self.state_space = self.env.observation_space.shape[0]
-        self.n_input = self.env.observation_space.shape[0] + self.n_action  # State + action
+        self.n_input = self.env.observation_space.shape[0]  # + self.n_action  # State + action
         self.n_output = 1  # Predicted reward
-        self.n_hidden_1 = 20  # 1st layer num features
-        self.n_hidden_2 = 20  # 2nd layer num features
+        self.n_hidden_1 = 40  # 1st layer num features
+        self.n_hidden_2 = 40  # 2nd layer num features
 
         self.cost_history = []
         self.test_acc_history = []
@@ -53,7 +55,7 @@ class TF_Reward_model:
         :return: the predicted next state
         """
         state_representation = np.array(curr_state)
-        state_representation /= self.max_reward
+        state_representation /= self.input_scale
         # Keep prob can be reduced a bit to generate uncertainty in model
         transition_prediction = self.sess.run(self.y_pred,
                                               feed_dict={self.X: [state_representation], self.X_action: [action_conv],
@@ -79,14 +81,11 @@ class TF_Reward_model:
 
             weights = {
                 'h1': tf.Variable(
-                    tf.random_uniform([self.n_input, self.n_hidden_1], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
+                    tf.random_normal([self.n_input, self.n_hidden_1])),
                 'h2': tf.Variable(
-                    tf.random_uniform([self.n_hidden_1, self.n_hidden_2], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
+                    tf.random_normal([self.n_hidden_1, self.n_hidden_2])),
                 'out': tf.Variable(
-                    tf.random_uniform([self.n_hidden_2, self.n_output], minval=self.w_init_limit[0],
-                                      maxval=self.w_init_limit[1])),
+                    tf.random_normal([self.n_hidden_2, self.n_output])),
             }
             biases = {
                 'b1': tf.Variable(tf.random_normal([self.n_hidden_1])),
@@ -94,8 +93,8 @@ class TF_Reward_model:
                 'bout': tf.Variable(tf.random_normal([self.n_output])),
             }
 
-            input = tf.concat(1, [self.X, self.X_action])
-            layer_1 = tf.nn.tanh(tf.add(tf.matmul(input, weights['h1']), biases['b1']))
+            # input = tf.concat(1, [self.X, self.X_action])
+            layer_1 = tf.nn.tanh(tf.add(tf.matmul(self.X, weights['h1']), biases['b1']))
             layer_1_drop = tf.nn.dropout(layer_1, self.keep_prob)  # Dropout layer
             layer_2 = tf.nn.tanh(tf.add(tf.matmul(layer_1_drop, weights['h2']), biases['b2']))
             layer_2_drop = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
@@ -109,8 +108,9 @@ class TF_Reward_model:
 
             # Define loss, minimize the squared error (with or without scaling)
             # self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
-            self.loss_function = tf.reduce_mean(tf.pow(y_true - self.y_pred, 2))
-            self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
+            self.loss_function = tf.reduce_mean(tf.square(y_true - self.y_pred))
+            # self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
+            self.optimizer = tf.train.RMSPropOptimizer(learning_rate, momentum=0.01).minimize(self.loss_function)
 
             # Evaluate model
             self.accuracy = tf.reduce_mean(tf.cast(self.loss_function, tf.float32))
@@ -122,16 +122,20 @@ class TF_Reward_model:
             self.init = tf.initialize_all_variables()
 
             # Launch the graph
-            self.sess = tf.Session(graph=self.graph)
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True
+            self.sess = tf.Session(graph=self.graph, config=config)
             self.sess.run(self.init)
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
               save=False, training_data=None, test_data_r=None, test_data_ac=None,
               save_path='transition_model/tf_transition_model.ckpt', logger=True):
+        self.training_epoch = 0
+
         # Load and preprocess data
         if logger:
             print("Preprocessing data...")
-        X_train, X_train_action, Y_train = self.preprocess_data(training_data)
+        X_train, X_train_action, Y_train = self.preprocess_data(training_data, max_data=1000)
         X_test_r, X_test_action_r, Y_test_r = self.preprocess_data(test_data_r)
         X_test_a_c, X_test_action_a_c, Y_test_a_c = self.preprocess_data(test_data_ac)
         X_train, Y_train = self.scale_data(X_train, Y_train)
@@ -146,6 +150,7 @@ class TF_Reward_model:
             print("Total nr of batches:", total_batch)
         # Training cycle
         for epoch in range(training_epochs):
+            self.training_epoch = epoch
             # Loop over all batches
             c = None
             idexes = np.arange(len(X_train))
@@ -186,6 +191,13 @@ class TF_Reward_model:
                                                     self.Y: Y_test_a_c, self.keep_prob: 1.0})
         print("Final test error actor critic:", acc_actor_critic)
 
+        # Applying encode and decode over test set and show some examples
+        encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
+                                                              self.X_action: X_test_action_r[:self.examples_to_show],
+                                                              self.keep_prob: 1.0})
+        print(Y_test_r[:self.examples_to_show] * self.max_reward)
+        print(encode_decode[:] * self.max_reward)
+
         if save:
             save_path = self.saver.save(self.sess, save_path)
             print("Model saved in file: %s" % save_path)
@@ -217,7 +229,7 @@ class TF_Reward_model:
                     self.x_max[j] = abs(d[0][j])
                 if abs(d[2][j]) > self.x_max[j]:
                     self.x_max[j] = abs(d[2][j])
-            x.append(np.array(d[0]))  # TODO Next state (t+1) or current state t?
+            x.append(np.array(d[2]))  # TODO Next state (t+1) or current state t?
             if self.n_action > 1:
                 ac = np.zeros(self.n_action)
                 ac[int(d[1])] = 1.0
@@ -238,9 +250,9 @@ class TF_Transition_model:
         if len(self.env.observation_space.low) == 4:
             self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Scaling for CartPole
         else:
-            self.input_scale = [4.8, 4.0, 0.418879020479, 4.0, 0.0, 0.0, 0.0, 0.0]  # Scaling for LunarLander
-        # self.reward_model = TF_Reward_model(env, history_sampling_rate=history_sampling_rate, w_init_limit=w_init_limit,
-        #                                     display_step=display_step)
+            self.input_scale = [4.8, 4.0, 0.418879020479, 4.0, 1.0, 1.0, 1.0, 1.0]  # Scaling for LunarLander TODO
+        self.reward_model = TF_Reward_model(env, self.input_scale, history_sampling_rate=history_sampling_rate,
+                                            w_init_limit=w_init_limit, display_step=display_step)
 
         # Training parameters
         self.display_step = display_step
@@ -293,8 +305,13 @@ class TF_Transition_model:
 
         # Returning the predicted transition (next state) rescaled back to normal
         next_state = transition_prediction[0] * self.input_scale
-        # reward = self.reward_model.predict(curr_state, action_conv)
-        reward, done = common.reward_function(curr_state)
+        reward = self.reward_model.predict(next_state, action_conv)
+        reward = round(max(0.0, reward))
+        # TODO maybe round reward to 0 or 1 for cartpole?
+        done = False
+        if reward <= 0.5:
+            done = True
+        # reward, done = common.reward_function(curr_state) # True reward function for CartPole
         return next_state, reward, done, None
 
     def restore_model(self, restore_path='transition_model/tf_transition_model.ckpt'):
@@ -401,7 +418,9 @@ class TF_Transition_model:
             self.init = tf.initialize_all_variables()
 
             # Launch the graph
-            self.sess = tf.Session(graph=self.graph)
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth = True
+            self.sess = tf.Session(graph=self.graph, config=config)
             self.sess.run(self.init)
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
@@ -409,9 +428,9 @@ class TF_Transition_model:
               save_path='transition_model/tf_transition_model.ckpt', logger=True):
 
         # Train reward model
-        # self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
-        #                         test_data_r=test_data_r, test_data_ac=test_data_ac,
-        #                         logger=logger)
+        self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
+                                test_data_r=test_data_r, test_data_ac=test_data_ac,
+                                logger=logger)
 
         if logger:
             print("Preprocessing data...")
@@ -552,13 +571,14 @@ if __name__ == '__main__':
     test_data_ac = np.load('cartpole_data/actor_critic/testing_data.npy')
 
     # # Current best is no dropout, not regularization, no scaling in loss-function
-    model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    model.train(training_epochs=15, learning_rate=0.0005, training_data=training_data[:200000], test_data_r=test_data_r,
-                test_data_ac=test_data_ac, save=False,
-                save_path="new_transition_model/transition_model.ckpt")
+    # model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
+    # model.train(training_epochs=15, learning_rate=0.0005, training_data=training_data[:200000], test_data_r=test_data_r,
+    #             test_data_ac=test_data_ac, save=False,
+    #             save_path="new_transition_model/transition_model.ckpt")
 
 
     # Reward model
-    # model = TF_Reward_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    # model.train(training_epochs=3000, learning_rate=0.001, logger=True, save=False,
-    #             save_path="new_transition_model/transition_model.ckpt")
+    model = TF_Reward_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
+    model.train(training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
+                training_epochs=3000, learning_rate=0.0005, logger=True, save=False, show_cost=True, show_test_acc=True,
+                save_path="new_transition_model/transition_model.ckpt")

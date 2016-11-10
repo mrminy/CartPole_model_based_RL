@@ -67,8 +67,8 @@ def main():
     np.savetxt("end_episode.csv", np.asarray(end_episode), delimiter=",")
     np.save('timesteps.npy', step_history)
     np.save('rewards.npy', reward_history)
-    np.savetxt("timesteps.csv", step_history, delimiter=",")
-    np.savetxt("rewards.csv", reward_history, delimiter=",")
+    # np.savetxt("timesteps.csv", step_history, delimiter=",")
+    # np.savetxt("rewards.csv", reward_history, delimiter=",")
 
 
 if __name__ == "__main__":

@@ -8,18 +8,19 @@ from model_based_learner import TF_Transition_model
 # HYPERPARMETERS
 H = 200
 H2 = 200
-batch_number = 500
-gamma = 0.99
+batch_number = 75
+gamma = 0.95
 num_between_q_copies = 150
-explore_decay = 0.9995  # Exploration decay per step
+explore_decay = 0.99995  # Exploration decay per step
 min_explore = 0.01
 max_steps = 1000
 reward_goal = 200
-memory_size = 1000000
+memory_size = 100000
 learning_rate = 0.008
 w_game_gui = True
 
 n_imagination_rollouts = 0
+
 
 class DQN:
     def __init__(self, env):
@@ -117,7 +118,9 @@ class DQN:
         if w_game_gui:
             self.env.monitor.start('./' + self.env.spec.id + '-pg-experiment', force=True)
 
-        with tf.Session() as sess:
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        with tf.Session(config=config) as sess:
             sess.run(self.init)
             sess.run(self.all_assigns)
 
@@ -326,7 +329,7 @@ if __name__ == '__main__':
         print("Agent nr:", i)
         dqn = DQN(gym.make('LunarLander-v2'))
         results.append(
-            dqn.train(max_episodes=10000, pre_learning_episodes=0, im_rollouts=False, logger=True))
+            dqn.train(max_episodes=1000, pre_learning_episodes=0, im_rollouts=False, logger=True))
     print(results)
     results = np.array(results)
     print("Avg:", np.mean(results))

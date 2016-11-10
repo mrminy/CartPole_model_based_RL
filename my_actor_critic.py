@@ -60,7 +60,9 @@ class Actor:
             print("Policy Graph Constructed")
 
         # Declare a TF session and initialize it
-        self.sess = tf.Session(graph=self.graph)
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        self.sess = tf.Session(graph=self.graph, config=config)
         self.sess.run(self.init)
 
     def rollout_policy(self, timeSteps, explore):
@@ -193,7 +195,7 @@ class Actor:
 
     def softmax_policy(self, state, weights, biases):
         """Defines softmax policy for tf graph"""
-        policy = tf.nn.softmax(tf.matmul(state, weights) + biases)
+        policy = tf.nn.softmax(tf.nn.tanh(tf.matmul(state, weights) + biases))
         return policy
 
     def choose_action(self, state, explore=True):
@@ -289,7 +291,9 @@ class Critic:
             self.optim = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
             init = tf.initialize_all_variables()
         print("Value Graph Constructed")
-        self.sess = tf.Session(graph=self.graph)
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        self.sess = tf.Session(graph=self.graph, config=config)
         self.sess.run(init)
 
     def multilayer_perceptron(self, x, weights, biases):
@@ -450,6 +454,8 @@ class ActorCriticLearner:
             for time_step in range(self.max_episodes):
                 action = np.random.choice(self.env.action_space.n)
                 next_state, reward, done, info = self.env.step(action)
+                if done:
+                    reward = 0.0
                 all_experience.append([state, action, next_state, reward])
                 for i in range(len(state)):
                     if state[i] > input_scale[i]:
@@ -471,12 +477,13 @@ class ActorCriticLearner:
 
         if self.n_pre_training_epochs != 0:
             # Gathering data for imagination rollouts
-            input_scale = self.gather_random_data(1000)
+            gathered_data_size = 600
+            input_scale = self.gather_random_data(gathered_data_size)
 
             # Train transition model on gathered data and pre-train actor-critic from imagination rollouts
             global all_experience
             training_data = np.array(all_experience)
-            if len(training_data) >= 1000:
+            if len(training_data) >= gathered_data_size:
                 print("Training size:", len(training_data))
                 test_data_r = np.load('cartpole_data/random_agent/testing_data.npy')
                 test_data_ac = np.load('cartpole_data/actor_critic/testing_data.npy')
