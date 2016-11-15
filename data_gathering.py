@@ -49,16 +49,16 @@ def gather_data_actor_critic(n_agents, max_episodes, max_time_steps, env, save_p
 
 if __name__ == '__main__':
     start_time = time.time()
-    env = gym.make('CartPole-v0')
+    env = gym.make('MsPacman-ram-v0')
 
     # Random agent sampling
-    # d = gather_data_random_agent(10000, 1000, env,
-    #                              save_path="cartpole_data_done/random_agent/training_data.npy",
-    #                              save_data=True)
-
-    d = gather_data_actor_critic(10, 1000, 1000, env,
-                                 save_path="cartpole_data_done/actor_critic/training_data.npy",
+    d = gather_data_random_agent(1000, 1000, env,
+                                 save_path="mspacman_data_done/random_agent/training_data.npy",
                                  save_data=True)
+
+    # d = gather_data_actor_critic(10, 1000, 1000, env,
+    #                              save_path="lunarlander_data_done/actor_critic/training_data.npy",
+    #                              save_data=True)
 
     # Actor critic sampling
     # d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data/actor_critic_testing_data.npy",

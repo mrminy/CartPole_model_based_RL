@@ -282,7 +282,7 @@ class TF_Reward_model:
         print("Building reward graph...")
         with self.graph.as_default():
             # Encode curr_state, add transition prediction with selected action and decode to predicted output state
-            self.X = tf.placeholder("float", [None, self.state_space])  # current state input
+            self.X = tf.placeholder("float", [None, self.state_space])  # next state input
             self.X_action = tf.placeholder("float", [None, self.n_action])  # action input
             self.Y = tf.placeholder("float", [None, self.n_output])  # output
             self.keep_prob = tf.placeholder(tf.float32)  # For dropout

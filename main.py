@@ -14,11 +14,22 @@ import numpy as np
 from my_actor_critic import ActorCriticLearner
 
 
+def save_data(step_history, reward_history, end_episode):
+    step_history = np.array(step_history)
+    reward_history = np.array(reward_history)
+
+    print(reward_history)
+
+    np.savetxt("end_episode.csv", np.asarray(end_episode), delimiter=",")
+    np.save('timesteps.npy', step_history)
+    np.save('rewards.npy', reward_history)
+
+
 def main():
     w_game_gui = True
     gym_name = 'CartPole-v0'
     action_uncertainty = 0.0  # 4/10 when 0.3 solved. 0/10 when 0.4
-    n_pre_training_episodes = 200
+    n_pre_training_episodes = 0
     n_rollout_epochs = 0  # Disabled for now..
     n_agents = 50  # Train n different agents
     learning_rate = 0.01
@@ -42,15 +53,16 @@ def main():
         discount = 0.85
         ac_learner = ActorCriticLearner(env, max_episodes, episodes_before_update, discount, n_pre_training_episodes,
                                         n_rollout_epochs, action_uncertainty=action_uncertainty, logger=True)
-        full_state_action_history.append(ac_learner.learn(env.spec.timestep_limit, env.spec.reward_threshold,
+        full_state_action_history.append(ac_learner.learn(env.spec.timestep_limit, 2000,
                                                           learning_rate=learning_rate,
                                                           imagination_learning_rate=pre_training_learning_rate))
         sum_steps.append(sum(env.monitor.stats_recorder.episode_lengths))
-        step_history.append(env.monitor.stats_recorder.episode_lengths)
         sum_rewards.append(sum(env.monitor.stats_recorder.episode_rewards))
+        step_history.append(env.monitor.stats_recorder.episode_lengths)
         reward_history.append(env.monitor.stats_recorder.episode_rewards)
         end_episode.append(ac_learner.last_episode)
         env.monitor.close()
+        save_data(step_history, reward_history, end_episode)
     print("Done simulating...")
     print("Sum steps:", sum_steps)
     print("Sum rewards:", sum_rewards)
@@ -59,16 +71,7 @@ def main():
     print("Std:", np.std(end_episode))
     print("Best:", np.min(end_episode))
 
-    step_history = np.array(step_history)
-    reward_history = np.array(reward_history)
-
-    print(reward_history)
-
-    np.savetxt("end_episode.csv", np.asarray(end_episode), delimiter=",")
-    np.save('timesteps.npy', step_history)
-    np.save('rewards.npy', reward_history)
-    # np.savetxt("timesteps.csv", step_history, delimiter=",")
-    # np.savetxt("rewards.csv", reward_history, delimiter=",")
+    save_data(step_history, reward_history, end_episode)
 
 
 if __name__ == "__main__":

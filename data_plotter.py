@@ -13,10 +13,12 @@ def show_space_utilization(data):
 def convert_reward_data(d):
     out = []
     for game in d:
-        g = []
+        g = np.zeros(500)
+        i = 0
         for val in game:
-            if val != 0 and len(g) < 1000:
-                g.append(val)
+            if val != 0:
+                g[i] = val
+                i += 1
         out.append(g)
     return out
 
@@ -34,17 +36,17 @@ def get_min_max(states):
     return s_max, s_min
 
 
-data = np.load('rewards.npy')
+data = np.load('lunar_rewards.npy')
 print(data)
 conv_data = convert_reward_data(data)
 print(conv_data)
 conv_data = np.array(conv_data)
-np.savetxt("rewards.csv", conv_data, delimiter=",")
+np.savetxt("lunar_rewards_baseline.csv", conv_data, delimiter=",")
 
-data = np.load('timesteps.npy')
+data = np.load('lunar_timesteps.npy')
 print(data)
 conv_data = convert_reward_data(data)
 print(conv_data)
 conv_data = np.array(conv_data)
-np.savetxt("timesteps.csv", conv_data, delimiter=",")
+np.savetxt("lunar_timesteps_baseline.csv", conv_data, delimiter=",")
 # pprint.PrettyPrinter(indent=4).pprint(get_min_max(data[:, 0]))
