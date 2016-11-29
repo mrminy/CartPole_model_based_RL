@@ -29,7 +29,7 @@ if __name__ == '__main__':
     parser.add_argument('--target', nargs="?", default="LunarLander-v2")
     parser.add_argument('--seed', nargs="?", default=None)
     parser.add_argument('--episodes', nargs="?", default=500)
-    n_agents = 1
+    n_agents = 10
     args = parser.parse_args()
     step_history = []
     reward_history = []
@@ -42,8 +42,8 @@ if __name__ == '__main__':
             seed = None
         nameenv = args.target
 
-        reward_threshold = gym.envs.registry.spec(nameenv).reward_threshold
         env = gym.make(nameenv)
+        reward_threshold = env.spec.reward_threshold
 
         if seed is not None:
             env.seed(seed)
@@ -98,7 +98,7 @@ if __name__ == '__main__':
         avg = 0.
         oldavg = 0.
 
-        pre_training_episodes = 50
+        pre_training_episodes = 200
         agents.do_imagination_rollouts(agent, env, pre_training_episodes)
         print("DONE pre-training", pre_training_episodes, "episodes")
 
@@ -161,6 +161,7 @@ if __name__ == '__main__':
                   agent.config['scalereward'], cost / steps, 'eps', agent.epsilon(eps), len(agent.memory))
         step_history.append(env.monitor.stats_recorder.episode_lengths)
         reward_history.append(env.monitor.stats_recorder.episode_rewards)
+        save_data(step_history, reward_history)
 
         # fig.savefig('last.png')
         # env.monitor.close()

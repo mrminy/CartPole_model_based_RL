@@ -334,7 +334,7 @@ def gather_random_data(env, n_steps=1000):
 def do_imagination_rollouts(agent, env, episodes, num_steps=None):
     if episodes > 0:
         # Gathering data for imagination rollouts
-        gathered_data_size = 10000
+        gathered_data_size = 50000
         experience = gather_random_data(env, gathered_data_size)
 
         # Train transition model on gathered data and pre-train actor-critic from imagination rollouts
@@ -342,13 +342,13 @@ def do_imagination_rollouts(agent, env, episodes, num_steps=None):
         print("Training size:", len(training_data))
         test_data_r = np.load('lunarlander_data_done/random_agent/testing_data.npy')
         # test_data_ac = np.load('lunarlander_data/actor_critic/testing_data.npy')
-        transition_model = model_based_learner.TF_Transition_model(env, display_step=100)
-        acc1, acc2 = transition_model.train(training_epochs=500, learning_rate=0.0005,
+        transition_model = model_based_learner.TF_Transition_model(env, w_init_limit=(-0.2, 0.2), display_step=100)
+        acc1, acc2 = transition_model.train(training_epochs=200, learning_rate=0.0005, batch_size=512,
                                             training_data=training_data, test_data_r=test_data_r,
                                             test_data_ac=None, logger=False)
         # Doing imagination episodes if test error is less than a threshold
         if num_steps is None:
-            num_steps = env.spec.timestep_limit
+            num_steps = 100  #env.spec.timestep_limit # Max the num steps because the imagination rollouts is inaccurate
 
         for episode in range(episodes):
             total_rew = 0.

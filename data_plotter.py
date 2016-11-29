@@ -13,7 +13,7 @@ def show_space_utilization(data):
 def convert_reward_data(d):
     out = []
     for game in d:
-        g = np.zeros(500)
+        g = np.zeros(2000)
         i = 0
         for val in game:
             if val != 0:
@@ -41,12 +41,12 @@ print(data)
 conv_data = convert_reward_data(data)
 print(conv_data)
 conv_data = np.array(conv_data)
-np.savetxt("lunar_rewards_baseline.csv", conv_data, delimiter=",")
+np.savetxt("lunar_rewards_mb_200_50000.csv", conv_data, delimiter=",")
 
 data = np.load('lunar_timesteps.npy')
 print(data)
 conv_data = convert_reward_data(data)
 print(conv_data)
 conv_data = np.array(conv_data)
-np.savetxt("lunar_timesteps_baseline.csv", conv_data, delimiter=",")
+np.savetxt("lunar_timesteps_mb_200_50000.csv", conv_data, delimiter=",")
 # pprint.PrettyPrinter(indent=4).pprint(get_min_max(data[:, 0]))
