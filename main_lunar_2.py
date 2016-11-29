@@ -20,15 +20,15 @@ def save_data(step_history, reward_history):
     print(reward_history)
 
     # np.savetxt("end_episode.csv", np.asarray(end_episode), delimiter=",")
-    np.save('lunar_timesteps.npy', step_history)
-    np.save('lunar_rewards.npy', reward_history)
+    np.save('pacman_timesteps.npy', step_history)
+    np.save('pacman_rewards.npy', reward_history)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target', nargs="?", default="LunarLander-v2")
+    parser.add_argument('--target', nargs="?", default="MsPacman-ram-v0")
     parser.add_argument('--seed', nargs="?", default=None)
-    parser.add_argument('--episodes', nargs="?", default=500)
+    parser.add_argument('--episodes', nargs="?", default=1000)
     n_agents = 10
     args = parser.parse_args()
     step_history = []
@@ -98,7 +98,7 @@ if __name__ == '__main__':
         avg = 0.
         oldavg = 0.
 
-        pre_training_episodes = 200
+        pre_training_episodes = 0
         agents.do_imagination_rollouts(agent, env, pre_training_episodes)
         print("DONE pre-training", pre_training_episodes, "episodes")
 
