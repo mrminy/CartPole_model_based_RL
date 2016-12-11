@@ -19,6 +19,7 @@ class TF_Done_model:
     """
     This model predicts the terminal state of the environment
     """
+
     def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.input_scale = input_scale
@@ -158,33 +159,41 @@ class TF_Done_model:
                                      feed_dict={self.X: batch_xs, self.Y: batch_ys, self.keep_prob: 1.0})
                 if i % self.history_sampling_rate == 0:
                     self.cost_history.append(c)
-                    sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
-                    self.test_acc_history.append(self.sess.run(self.accuracy,
-                                                               feed_dict={self.X: X_test_r[sampled_indexes],
-                                                                          self.Y: Y_test_r[sampled_indexes],
-                                                                          self.keep_prob: 1.0}))
+                    if len(X_test_r) > 0:
+                        sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
+                        self.test_acc_history.append(self.sess.run(self.accuracy,
+                                                                   feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                              self.Y: Y_test_r[sampled_indexes],
+                                                                              self.keep_prob: 1.0}))
 
             # Display logs per epoch step
-            if epoch % self.display_step == 0 and c is not None:
+            test_error =0.0
+            if epoch % self.display_step == 0 and c is not None and len(X_test_r) > 0:
                 test_error = self.sess.run(self.accuracy, feed_dict={self.X: X_test_r[sampled_indexes],
                                                                      self.Y: Y_test_r[sampled_indexes],
                                                                      self.keep_prob: 1.0})
-                print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
-                      "{:.9f}".format(test_error))
+            print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
+                  "{:.9f}".format(test_error))
 
-        acc_random_agent = self.sess.run(self.accuracy,
-                                         feed_dict={self.X: X_test_r, self.Y: Y_test_r,
-                                                    self.keep_prob: 1.0})
-        print("Final test error random agent:", acc_random_agent)
-        acc_actor_critic = self.sess.run(self.accuracy,
-                                         feed_dict={self.X: X_test_a_c, self.Y: Y_test_a_c, self.keep_prob: 1.0})
-        print("Final test error actor critic:", acc_actor_critic)
+        acc_actor_critic = 0.0
+        acc_random_agent = 0.0
+        if len(X_test_r) > 0:
+            acc_random_agent = self.sess.run(self.accuracy,
+                                             feed_dict={self.X: X_test_r, self.Y: Y_test_r,
+                                                        self.keep_prob: 1.0})
+            print("Final test error random agent:", acc_random_agent)
 
-        # Applying encode and decode over test set and show some examples
-        encode_decode = self.sess.run(self.y_pred,
-                                      feed_dict={self.X: X_test_r[:self.examples_to_show], self.keep_prob: 1.0})
-        print(Y_test_r[:self.examples_to_show])
-        print(encode_decode[:])
+        if len(X_test_a_c) > 0:
+            acc_actor_critic = self.sess.run(self.accuracy,
+                                             feed_dict={self.X: X_test_a_c, self.Y: Y_test_a_c, self.keep_prob: 1.0})
+            print("Final test error actor critic:", acc_actor_critic)
+
+        if len(X_test_r) > 0:
+            # Applying encode and decode over test set and show some examples
+            encode_decode = self.sess.run(self.y_pred,
+                                          feed_dict={self.X: X_test_r[:self.examples_to_show], self.keep_prob: 1.0})
+            print(Y_test_r[:self.examples_to_show])
+            print(encode_decode[:])
 
         if save:
             save_path = self.saver.save(self.sess, save_path)
@@ -203,11 +212,15 @@ class TF_Done_model:
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.input_scale
+        if len(x) > 0:
+            return x / self.input_scale
+        return x
 
     def preprocess_data(self, value, max_data=999999999):
         x = []
         y = []
+        if value is None or len(value) == 0:
+            return np.array(x), np.array(y)
         for d in value:
             for j in range(len(d[0])):
                 if abs(d[0][j]) > self.x_max[j]:
@@ -230,6 +243,7 @@ class TF_Reward_model:
     This model predicts the reward received after performing an action 'a' in a state 'St' and observing the next
     predicted state 'St+1'
     """
+
     def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.max_reward = 1.0  # This is updated during the pre-processing
@@ -380,38 +394,44 @@ class TF_Reward_model:
                                                 self.keep_prob: 1.0})
                 if i % self.history_sampling_rate == 0:
                     self.cost_history.append(c)
-                    sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
-                    self.test_acc_history.append(self.sess.run(self.accuracy,
-                                                               feed_dict={self.X: X_test_r[sampled_indexes],
-                                                                          self.X_action: X_test_action_r[
-                                                                              sampled_indexes],
-                                                                          self.Y: Y_test_r[sampled_indexes],
-                                                                          self.keep_prob: 1.0}))
+                    if len(X_test_r) > 0:
+                        sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
+                        self.test_acc_history.append(self.sess.run(self.accuracy,
+                                                                   feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                              self.X_action: X_test_action_r[
+                                                                                  sampled_indexes],
+                                                                              self.Y: Y_test_r[sampled_indexes],
+                                                                              self.keep_prob: 1.0}))
 
             # Display logs per epoch step
-            if epoch % self.display_step == 0 and c is not None:
+            test_error = 0.0
+            if epoch % self.display_step == 0 and c is not None and len(X_test_r) > 0:
                 test_error = self.sess.run(self.accuracy, feed_dict={self.X: X_test_r[sampled_indexes],
                                                                      self.X_action: X_test_action_r[sampled_indexes],
                                                                      self.Y: Y_test_r[sampled_indexes],
                                                                      self.keep_prob: 1.0})
-                print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
-                      "{:.9f}".format(test_error))
-
-        acc_random_agent = self.sess.run(self.accuracy,
-                                         feed_dict={self.X: X_test_r, self.X_action: X_test_action_r, self.Y: Y_test_r,
-                                                    self.keep_prob: 1.0})
-        print("Final test error random agent:", acc_random_agent)
-        acc_actor_critic = self.sess.run(self.accuracy,
-                                         feed_dict={self.X: X_test_a_c, self.X_action: X_test_action_a_c,
-                                                    self.Y: Y_test_a_c, self.keep_prob: 1.0})
-        print("Final test error actor critic:", acc_actor_critic)
+            print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
+                  "{:.9f}".format(test_error))
+        acc_actor_critic = 0.0
+        acc_random_agent = 0.0
+        if len(X_test_r) > 0:
+            acc_random_agent = self.sess.run(self.accuracy,
+                                             feed_dict={self.X: X_test_r, self.X_action: X_test_action_r, self.Y: Y_test_r,
+                                                        self.keep_prob: 1.0})
+            print("Final test error random agent:", acc_random_agent)
+        if len(X_test_a_c) > 0:
+            acc_actor_critic = self.sess.run(self.accuracy,
+                                             feed_dict={self.X: X_test_a_c, self.X_action: X_test_action_a_c,
+                                                        self.Y: Y_test_a_c, self.keep_prob: 1.0})
+            print("Final test error actor critic:", acc_actor_critic)
 
         # Applying encode and decode over test set and show some examples
-        encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
-                                                              self.X_action: X_test_action_r[:self.examples_to_show],
-                                                              self.keep_prob: 1.0})
-        print(Y_test_r[:self.examples_to_show] * self.max_reward)
-        print(encode_decode[:] * self.max_reward)
+        if len(X_test_r) > 0:
+            encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
+                                                                  self.X_action: X_test_action_r[:self.examples_to_show],
+                                                                  self.keep_prob: 1.0})
+            print(Y_test_r[:self.examples_to_show] * self.max_reward)
+            print(encode_decode[:] * self.max_reward)
 
         if save:
             save_path = self.saver.save(self.sess, save_path)
@@ -430,20 +450,19 @@ class TF_Reward_model:
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.input_scale, y / self.max_reward
+        if len(x) > 0 or len(y) > 0:
+            return x / self.input_scale, y / self.max_reward
+        return x, y
 
     def preprocess_data(self, value, max_data=999999999):
         x = []
         x_action = []
         y = []
+        if value is None or len(value) == 0:
+            return np.array(x), np.array(x_action), np.array(y)
         for d in value:
             if abs(d[3]) > self.max_reward:
                 self.max_reward = abs(d[3])
-            for j in range(len(d[0])):
-                if abs(d[0][j]) > self.x_max[j]:
-                    self.x_max[j] = abs(d[0][j])
-                if abs(d[2][j]) > self.x_max[j]:
-                    self.x_max[j] = abs(d[2][j])
             x.append(np.array(d[2]))  # Input is the next predicted state 'St+1'
             if self.n_action > 1:
                 ac = np.zeros(self.n_action)
@@ -451,7 +470,7 @@ class TF_Reward_model:
                 x_action.append(ac)  # Action
             else:
                 x_action.append([d[1]])
-            y.append(np.array([d[3]]))  # Label is the reward
+            y.append(np.array([d[3]]))  # Reward
             if len(y) >= max_data:
                 break
         x, x_action, y = np.array(x), np.array(x_action), np.array(y)
@@ -463,6 +482,7 @@ class TF_Transition_model:
     This is the main transition model, containing the reward prediction model and terminal state prediction model as
     well as the state transition prediction model.
     """
+
     def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.graph = tf.Graph()
@@ -603,21 +623,11 @@ class TF_Transition_model:
 
             # Prediction
             self.y_pred = decoder_op
-            # Targets (Labels) are the input data.
             y_true = self.Y
 
-            # Define loss, minimize the squared error (with or without scaling)
-            # self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
+            # MSE loss
             self.loss_function = tf.reduce_mean(tf.pow(y_true - self.y_pred, 2))
 
-            # L2 regularization
-            # regularization = (tf.nn.l2_loss(weights['encoder_h1']) + tf.nn.l2_loss(biases['encoder_b1']) +
-            #                   tf.nn.l2_loss(weights['encoder_h2']) + tf.nn.l2_loss(biases['encoder_b2']) +
-            #                   tf.nn.l2_loss(weights['transition_h1']) + tf.nn.l2_loss(biases['transition_b1']) +
-            #                   tf.nn.l2_loss(weights['decoder_h1']) + tf.nn.l2_loss(biases['decoder_b1']) +
-            #                   tf.nn.l2_loss(weights['decoder_h2']) + tf.nn.l2_loss(biases['decoder_b2']))
-            # Add the l2 loss to the loss function
-            # self.loss_function += 5e-4 * regularization
             self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
 
             # Evaluate model
@@ -638,15 +648,16 @@ class TF_Transition_model:
             self.sess.run(self.init)
 
     def train(self, training_epochs=20, learning_rate=0.001, batch_size=128, show_cost=False, show_test_acc=False,
-              save=False, training_data=None, test_data_r=None, test_data_ac=None,
+              save=False, training_data=None, test_data_r=None, test_data_ac=None, train_full_model=True,
               save_path='transition_model/tf_transition_model.ckpt', logger=True, max_training_data=9999999):
 
-        # Train reward model
-        self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
-                                test_data_r=test_data_r, test_data_ac=test_data_ac, logger=logger)
-        # Train done model
-        self.done_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
-                              test_data_r=test_data_r, test_data_ac=test_data_ac, logger=logger)
+        if train_full_model:
+            # Train reward model
+            self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
+                                    test_data_r=test_data_r, test_data_ac=test_data_ac, logger=logger)
+            # Train done model
+            self.done_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
+                                  test_data_r=test_data_r, test_data_ac=test_data_ac, logger=logger)
 
         if logger:
             print("Preprocessing data...")
@@ -681,38 +692,46 @@ class TF_Transition_model:
                                                 self.keep_prob: 1.0})
                 if i % self.history_sampling_rate == 0:
                     self.cost_history.append(c)
-                    sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
-                    self.test_acc_history.append(self.sess.run(self.accuracy,
-                                                               feed_dict={self.X: X_test_r[sampled_indexes],
-                                                                          self.X_action: X_test_action_r[
-                                                                              sampled_indexes],
-                                                                          self.Y: Y_test_r[sampled_indexes],
-                                                                          self.keep_prob: 1.0}))
+                    if len(X_test_r) > 0:
+                        sampled_indexes = np.random.choice(np.arange(0, len(X_test_r)), 50000)
+                        self.test_acc_history.append(self.sess.run(self.accuracy,
+                                                                   feed_dict={self.X: X_test_r[sampled_indexes],
+                                                                              self.X_action: X_test_action_r[
+                                                                                  sampled_indexes],
+                                                                              self.Y: Y_test_r[sampled_indexes],
+                                                                              self.keep_prob: 1.0}))
 
             # Display logs per epoch step
-            if epoch % self.display_step == 0 and c is not None:
+            test_error = 0.0
+            if epoch % self.display_step == 0 and c is not None and len(X_test_r) > 0:
                 test_error = self.sess.run(self.accuracy, feed_dict={self.X: X_test_r[sampled_indexes],
                                                                      self.X_action: X_test_action_r[sampled_indexes],
                                                                      self.Y: Y_test_r[sampled_indexes],
                                                                      self.keep_prob: 1.0})
-                print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
-                      "{:.9f}".format(test_error))
+            print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
+                  "{:.9f}".format(test_error))
 
-        acc_random_agent = self.sess.run(self.accuracy,
-                                         feed_dict={self.X: X_test_r, self.X_action: X_test_action_r, self.Y: Y_test_r,
-                                                    self.keep_prob: 1.0})
-        print("Final test error random agent:", acc_random_agent)
-        acc_actor_critic = self.sess.run(self.accuracy,
-                                         feed_dict={self.X: X_test_a_c, self.X_action: X_test_action_a_c,
-                                                    self.Y: Y_test_a_c, self.keep_prob: 1.0})
-        print("Final test error actor critic:", acc_actor_critic)
+        acc_random_agent = 0.0
+        acc_actor_critic = 0.0
+        if len(X_test_r) > 0:
+            acc_random_agent = self.sess.run(self.accuracy,
+                                             feed_dict={self.X: X_test_r, self.X_action: X_test_action_r, self.Y: Y_test_r,
+                                                        self.keep_prob: 1.0})
+            print("Final test error random agent:", acc_random_agent)
 
-        # Applying encode and decode over test set and show some examples
-        encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
-                                                              self.X_action: X_test_action_r[:self.examples_to_show],
-                                                              self.keep_prob: 1.0})
-        print(Y_test_r[:self.examples_to_show] * self.input_scale)
-        print(encode_decode[:] * self.input_scale)
+        if len(X_test_a_c) > 0:
+            acc_actor_critic = self.sess.run(self.accuracy,
+                                             feed_dict={self.X: X_test_a_c, self.X_action: X_test_action_a_c,
+                                                        self.Y: Y_test_a_c, self.keep_prob: 1.0})
+            print("Final test error actor critic:", acc_actor_critic)
+
+        if len(X_test_r) > 0:
+            # Applying encode and decode over test set and show some examples
+            encode_decode = self.sess.run(self.y_pred, feed_dict={self.X: X_test_r[:self.examples_to_show],
+                                                                  self.X_action: X_test_action_r[:self.examples_to_show],
+                                                                  self.keep_prob: 1.0})
+            print(Y_test_r[:self.examples_to_show] * self.input_scale)
+            print(encode_decode[:] * self.input_scale)
 
         if save:
             save_path = self.saver.save(self.sess, save_path)
@@ -731,19 +750,17 @@ class TF_Transition_model:
         return acc_random_agent, acc_actor_critic
 
     def scale_data(self, x, y):
-        return x / self.input_scale, y / self.input_scale
+        if len(x) > 0 or len(y) > 0:
+            return x / self.input_scale, y / self.input_scale
+        return x, y
 
     def preprocess_data(self, value, max_data=999999999):
         x = []
         x_action = []
         y = []
+        if value is None or len(value) == 0:
+            return np.array(x), np.array(x_action), np.array(y)
         for d in value:
-            for j in range(len(d[0])):
-                if abs(d[0][j]) > self.x_max[j]:
-                    self.x_max[j] = abs(d[0][j])
-                if abs(d[2][j]) > self.x_max[j]:
-                    self.x_max[j] = abs(d[2][j])
-
             x.append(np.array(d[0]))  # State t (and scale)
             if self.env.action_space.n <= 2:
                 x_action.append([d[1]])  # Action
@@ -767,8 +784,9 @@ if __name__ == '__main__':
     test_data_ac = np.load('cartpole_data_done/actor_critic/testing_data.npy')
 
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    model.train(training_epochs=3000, learning_rate=0.0005, training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
-                save=True, save_path="transition_model_saves/cartpole/transition_model_250.ckpt", max_training_data=1000)
+    model.train(training_epochs=200, learning_rate=0.001, training_data=training_data, test_data_r=test_data_r,
+                test_data_ac=test_data_ac, save=True,
+                save_path="transition_model_saves/cartpole/transition_model_250.ckpt", max_training_data=1000)
 
     # Train the reward model separately
     # model = TF_Reward_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
