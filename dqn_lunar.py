@@ -337,7 +337,7 @@ def gather_random_data(env, n_steps=1000):
     return experience
 
 
-def do_imagination_rollouts(agent, env, episodes, gathered_data_size=20000,
+def do_imagination_rollouts(agent, env, episodes, gathered_data_size=10000,
                             test_data_path='lunarlander_data_done/random_agent/testing_data.npy', num_steps=None):
     """
     Trains the dynamics models and performs simulations

@@ -1,1 +1,3 @@
-Data for LunarLander
+Data folder for LunarLander.
+
+To generate pre-gathered data for LunarLander, go to data_gathering.py

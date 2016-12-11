@@ -1,1 +1,3 @@
-Data for CartPole
+Data folder for CartPole
+
+To generate pre-gathered data for CartPole, go to data_gathering.py

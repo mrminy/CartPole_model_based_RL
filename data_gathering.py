@@ -74,8 +74,8 @@ if __name__ == '__main__':
     d = gather_data_random_agent(env, env.spec.timestep_limit, 1000,
                                  save_path="lunarlander_data_done/random_agent/training_data.npy", save_data=True)
 
-    # Actor critic sampling for cartpole
-    # d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data/actor_critic_testing_data.npy",
+    # Actor critic sampling for cartpole.
+    # d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data_done/actor_critic/training_data.npy",
     #                              save_data=True)
 
     print("Number of steps:", len(d))

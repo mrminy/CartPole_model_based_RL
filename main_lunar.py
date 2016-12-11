@@ -31,8 +31,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--target', nargs="?", default="LunarLander-v2")  # Environment
     parser.add_argument('--seed', nargs="?", default=None)
-    parser.add_argument('--episodes', nargs="?", default=500)  # Maximum number of episodes per agent
-    n_agents = 10  # Number of different agents to train
+    parser.add_argument('--episodes', nargs="?", default=1000)  # Maximum number of episodes per agent
+    n_agents = 1  # Number of different agents to train
     args = parser.parse_args()
     step_history = []
     reward_history = []
@@ -83,8 +83,8 @@ if __name__ == '__main__':
         oldavg = 0.
 
         # Train and perform simulations using the transition model
-        pre_training_episodes = 300  # Number of episodes to simulate using dynamics model
-        agents.do_imagination_rollouts(agent, env, pre_training_episodes, num_steps=70)
+        pre_training_episodes = 200  # Number of episodes to simulate using dynamics model
+        agents.do_imagination_rollouts(agent, env, pre_training_episodes, num_steps=300)
         print("Done pre-training", pre_training_episodes, "episodes")
 
         # Train model-free after pre-training
