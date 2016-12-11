@@ -1,9 +1,10 @@
 """
 This is my implementation of a deep neural network to approximate the transition function of an environment (CartPole).
-The transition-model is trained supervised by previously gathered data from the environment.
+The transition model is trained supervised by previously gathered data from the environment.
 The trained model is then further used to improve learning of a general agent in the same environment.
-Transition-model could be used for pre-training, full imagination rollouts between episodes or
- imagination rollout actions between real actions (for planning or simulated experience).
+Further work could involve retraining the transition model after n real episodes (like Dyna-Q), performing shorter
+ imagination rollouts in real episodes for planning trajectories, or improve exploration policy by using the
+ uncertanty of the transition model.
 """
 
 import gym
@@ -15,6 +16,9 @@ import common
 
 
 class TF_Done_model:
+    """
+    This model predicts the terminal state of the environment
+    """
     def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.input_scale = input_scale
@@ -95,7 +99,6 @@ class TF_Done_model:
             layer_2_drop = tf.nn.dropout(layer_2, self.keep_prob)  # Dropout layer
             out = tf.nn.tanh(tf.add(tf.matmul(layer_2_drop, weights['out']), biases['bout']))
             out = tf.nn.dropout(out, self.keep_prob)  # Dropout layer
-            # out = tf.nn.softmax(out) # TODO do I need this?
 
             # Prediction
             self.y_pred = out
@@ -211,9 +214,9 @@ class TF_Done_model:
                     self.x_max[j] = abs(d[0][j])
                 if abs(d[2][j]) > self.x_max[j]:
                     self.x_max[j] = abs(d[2][j])
-            x.append(np.array(d[2]))  # TODO Next state (t+1) or current state t?
+            x.append(np.array(d[2]))  # Input is the next state (St+1)
             if d[4]:
-                y.append(np.array([1.]))  # Done
+                y.append(np.array([1.]))  # Label is done/not done
             else:
                 y.append(np.array([0.]))
             if len(y) >= max_data:
@@ -223,6 +226,10 @@ class TF_Done_model:
 
 
 class TF_Reward_model:
+    """
+    This model predicts the reward received after performing an action 'a' in a state 'St' and observing the next
+    predicted state 'St+1'
+    """
     def __init__(self, env, input_scale, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.max_reward = 1.0  # This is updated during the pre-processing
@@ -317,8 +324,8 @@ class TF_Reward_model:
             # Define loss, minimize the squared error (with or without scaling)
             # self.loss_function = tf.reduce_mean(tf.pow(((y_true - self.y_pred) * self.input_scale), 2))
             self.loss_function = tf.reduce_mean(tf.square(y_true - self.y_pred))
-            # self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
-            self.optimizer = tf.train.RMSPropOptimizer(learning_rate, momentum=0.01).minimize(self.loss_function)
+            self.optimizer = tf.train.AdamOptimizer(learning_rate).minimize(self.loss_function)
+            # self.optimizer = tf.train.RMSPropOptimizer(learning_rate, momentum=0.01).minimize(self.loss_function)
 
             # Evaluate model
             self.accuracy = tf.reduce_mean(tf.cast(self.loss_function, tf.float32))
@@ -437,14 +444,14 @@ class TF_Reward_model:
                     self.x_max[j] = abs(d[0][j])
                 if abs(d[2][j]) > self.x_max[j]:
                     self.x_max[j] = abs(d[2][j])
-            x.append(np.array(d[2]))  # TODO Next state (t+1) or current state t?
+            x.append(np.array(d[2]))  # Input is the next predicted state 'St+1'
             if self.n_action > 1:
                 ac = np.zeros(self.n_action)
                 ac[int(d[1])] = 1.0
                 x_action.append(ac)  # Action
             else:
                 x_action.append([d[1]])
-            y.append(np.array([d[3]]))  # Reward
+            y.append(np.array([d[3]]))  # Label is the reward
             if len(y) >= max_data:
                 break
         x, x_action, y = np.array(x), np.array(x_action), np.array(y)
@@ -452,13 +459,14 @@ class TF_Reward_model:
 
 
 class TF_Transition_model:
+    """
+    This is the main transition model, containing the reward prediction model and terminal state prediction model as
+    well as the state transition prediction model.
+    """
     def __init__(self, env, history_sampling_rate=1, w_init_limit=(-0.5, 0.5), display_step=1):
         self.env = env
         self.graph = tf.Graph()
-        if len(self.env.observation_space.low) == 4:
-            self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Scaling for CartPole
-        else:
-            self.input_scale = [4.8, 4.0, 0.418879020479, 4.0, 1.0, 1.0, 1.0, 1.0]  # Scaling for LunarLander TODO
+        self.input_scale = [4.8, 4.0, 0.418879020479, 4.0]  # Scaling for CartPole based on gathered data
         self.reward_model = TF_Reward_model(env, self.input_scale, history_sampling_rate=history_sampling_rate,
                                             w_init_limit=w_init_limit, display_step=display_step)
         self.done_model = TF_Done_model(env, self.input_scale, history_sampling_rate=history_sampling_rate,
@@ -517,8 +525,7 @@ class TF_Transition_model:
         next_state = transition_prediction[0] * self.input_scale
         reward = self.reward_model.predict(next_state, action_conv)
         done = self.done_model.predict(next_state, action_conv)
-        # TODO maybe round reward to 0 or 1 for cartpole?
-        # reward, done = common.reward_function(curr_state) # True reward function for CartPole
+        # reward, done = common.reward_function(curr_state) # Use this for the true reward function for CartPole
         return next_state, reward, done, None
 
     def restore_model(self, restore_path='transition_model/tf_transition_model.ckpt'):
@@ -636,12 +643,10 @@ class TF_Transition_model:
 
         # Train reward model
         self.reward_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
-                                test_data_r=test_data_r, test_data_ac=test_data_ac,
-                                logger=logger)
+                                test_data_r=test_data_r, test_data_ac=test_data_ac, logger=logger)
         # Train done model
         self.done_model.train(training_epochs, learning_rate, batch_size, training_data=training_data,
-                              test_data_r=test_data_r, test_data_ac=test_data_ac,
-                              logger=logger)
+                              test_data_r=test_data_r, test_data_ac=test_data_ac, logger=logger)
 
         if logger:
             print("Preprocessing data...")
@@ -660,7 +665,7 @@ class TF_Transition_model:
         if logger:
             print("Starting training...")
             print("Total nr of batches:", total_batch)
-        # Training cycle
+        # Training cycle for the state transition prediction model
         for epoch in range(training_epochs):
             # Loop over all batches
             c = None
@@ -693,13 +698,6 @@ class TF_Transition_model:
                 print("Epoch:", '%04d' % (epoch + 1), "cost=", "{:.9f}".format(c), "test error=",
                       "{:.9f}".format(test_error))
 
-
-                # print("Test error random agent:", acc_random_agent)
-                # acc_actor_critic = self.sess.run(self.accuracy,
-                #                                  feed_dict={self.X: X_test_a_c, self.X_action: X_test_action_a_c,
-                #                                             self.Y: Y_test_a_c})
-                # print("Test error actor critic:", acc_actor_critic)
-
         acc_random_agent = self.sess.run(self.accuracy,
                                          feed_dict={self.X: X_test_r, self.X_action: X_test_action_r, self.Y: Y_test_r,
                                                     self.keep_prob: 1.0})
@@ -721,21 +719,14 @@ class TF_Transition_model:
             print("Model saved in file: %s" % save_path)
 
         if show_test_acc:
-            # x_axis = np.arange(1, len(self.cost_history))
             y_axis = np.array(self.test_acc_history)
             plt.plot(y_axis)
-            # plt.axis([0, len(self.cost_history), 0, np.max(y_axis) * 1.1])
             plt.show()
 
         if show_cost:
-            # x_axis = np.arange(1, len(self.cost_history))
             y_axis = np.array(self.cost_history)
             plt.plot(y_axis)
-            # plt.axis([0, len(self.cost_history), 0, np.max(y_axis) * 1.1])
             plt.show()
-
-        # np.savetxt("cost.csv", self.cost_history, delimiter=",")
-        # np.savetxt("acc.csv", self.test_acc_history, delimiter=",")
 
         return acc_random_agent, acc_actor_critic
 
@@ -768,33 +759,25 @@ class TF_Transition_model:
 
 
 if __name__ == '__main__':
-    """
-    TODO
-    - Try dropout
-    - Try LSTM for the prediction layer (feed sequential bathces)
-    - Try euclidean loss?
-    - Try regularization L2?
-    """
     env = gym.make('CartPole-v0')
 
+    # Training and testing data
     training_data = np.load('cartpole_data_done/random_agent/training_data.npy')
     test_data_r = np.load('cartpole_data_done/random_agent/testing_data.npy')
     test_data_ac = np.load('cartpole_data_done/actor_critic/testing_data.npy')
 
-    # # Current best is no dropout, not regularization, no scaling in loss-function
     model = TF_Transition_model(env, history_sampling_rate=1, w_init_limit=(-0.2, 0.2))
-    model.train(training_epochs=15, learning_rate=0.0005, training_data=training_data, test_data_r=test_data_r,
-                test_data_ac=test_data_ac, save=False,
-                save_path="new_transition_model/transition_model.ckpt", max_training_data=1000)
+    model.train(training_epochs=3000, learning_rate=0.0005, training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
+                save=True, save_path="transition_model_saves/cartpole/transition_model_250.ckpt", max_training_data=1000)
 
-    # Reward model
+    # Train the reward model separately
     # model = TF_Reward_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
     # model.train(training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
     #             training_epochs=3000, learning_rate=0.0005, logger=True, save=False, show_cost=True, show_test_acc=True,
     #             save_path="new_transition_model/transition_model.ckpt", max_training_data=1000)
 
-    # Done model
-    model = TF_Done_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
-    model.train(training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
-                training_epochs=3000, learning_rate=0.0005, logger=True, save=False, show_cost=True, show_test_acc=True,
-                max_training_data=1000)
+    # Train the done model separately
+    # model = TF_Done_model(env, [4.8, 4.0, 0.418879020479, 4.0], history_sampling_rate=1, w_init_limit=(-0.5, 0.5))
+    # model.train(training_data=training_data, test_data_r=test_data_r, test_data_ac=test_data_ac,
+    #             training_epochs=3000, learning_rate=0.0005, logger=True, save=False, show_cost=True, show_test_acc=True,
+    #             max_training_data=1000)

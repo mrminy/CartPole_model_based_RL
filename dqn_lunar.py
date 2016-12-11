@@ -1,11 +1,12 @@
-'''
-Created on Jun 26, 2016
-@author: Davide Nitti
+"""
+This is a modified version of
 https://github.com/davidenitti/ML/tree/master/RL/gymeval
-'''
+from Davide Nitti
+
+This version of DQN is made to support a model-based version.
+"""
 
 import gym
-import logging
 import numpy as np
 import math, time
 import tensorflow as tf
@@ -13,7 +14,7 @@ import pickle
 from gym import spaces
 import os.path
 
-import model_based_learner_lunar_2 as model_based_learner
+import model_based_learner_lunar as model_based_learner
 
 
 def multilayer_perceptron(_X, numhidden, regulariz, minout=None, maxout=None, initbias=0., outhidden=-1, seed=None):
@@ -48,6 +49,7 @@ def multilayer_perceptron(_X, numhidden, regulariz, minout=None, maxout=None, in
         return layer_out, regul, hidlayer
     else:
         return layer_out, regul
+
 
 class deepQAgent(object):
     def __del__(self):
@@ -208,7 +210,6 @@ class deepQAgent(object):
             self.saver.restore(self.sess, self.config['file'] + ".tf")
         self.sess.run(tf.assign(self.global_step, 0))
 
-
     def learn(self, state, action, obnew, reward, notdone, nextaction):
         if self.isdiscrete:
             cost = 0
@@ -298,7 +299,6 @@ class deepQAgent(object):
                 observation = observation.reshape(1, -1)
             return np.argmax(self.sess.run(self.Q, feed_dict={self.x: observation}))
 
-
     def act(self, observation, episode=None):
         eps = self.epsilon(episode)
 
@@ -314,6 +314,12 @@ class deepQAgent(object):
 
 
 def gather_random_data(env, n_steps=1000):
+    """
+    Follows a random action policy to gather data
+    :param env: the environment
+    :param n_steps: number of steps to perform
+    :return: all experience
+    """
     total_steps = 0
     experience = []
     while True:
@@ -331,24 +337,33 @@ def gather_random_data(env, n_steps=1000):
     return experience
 
 
-def do_imagination_rollouts(agent, env, episodes, num_steps=None):
+def do_imagination_rollouts(agent, env, episodes, gathered_data_size=20000,
+                            test_data_path='lunarlander_data_done/random_agent/testing_data.npy', num_steps=None):
+    """
+    Trains the dynamics models and performs simulations
+    :param agent: the agent
+    :param env: the environment
+    :param episodes: the number of episodes to pre-train in simulation
+    :param gathered_data_size: size of data to collect in order to train the dynamics models
+    :param test_data_path: path to test data to see how well the dynamics model trains
+    :param num_steps: number of time steps per simulation episode
+    """
     if episodes > 0:
         # Gathering data for imagination rollouts
-        gathered_data_size = 50000
+        gathered_data_size = gathered_data_size
         experience = gather_random_data(env, gathered_data_size)
 
         # Train transition model on gathered data and pre-train actor-critic from imagination rollouts
         training_data = np.array(experience)
         print("Training size:", len(training_data))
-        test_data_r = np.load('lunarlander_data_done/random_agent/testing_data.npy')
-        # test_data_ac = np.load('lunarlander_data/actor_critic/testing_data.npy')
-        transition_model = model_based_learner.TF_Transition_model(env, w_init_limit=(-0.2, 0.2), display_step=100)
-        acc1, acc2 = transition_model.train(training_epochs=200, learning_rate=0.0005, batch_size=512,
+        test_data_r = np.load(test_data_path)
+        transition_model = model_based_learner.TF_Transition_model(env, w_init_limit=(-0.2, 0.2), display_step=50)
+        acc1, acc2 = transition_model.train(training_epochs=250, learning_rate=0.001, batch_size=128,
                                             training_data=training_data, test_data_r=test_data_r,
                                             test_data_ac=None, logger=False)
-        # Doing imagination episodes if test error is less than a threshold
+
         if num_steps is None:
-            num_steps = 100  #env.spec.timestep_limit # Max the num steps because the imagination rollouts is inaccurate
+            num_steps = env.spec.timestep_limit
 
         for episode in range(episodes):
             total_rew = 0.

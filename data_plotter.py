@@ -1,19 +1,13 @@
 """
-This file is for showing different graphs for different data
+Not an important script. Used for converting numpy arrays into nice csv-files...
 """
-import pprint
-import matplotlib.pyplot as plt
 import numpy as np
-
-
-def show_space_utilization(data):
-    pass
 
 
 def convert_reward_data(d):
     out = []
     for game in d:
-        g = np.zeros(2000)
+        g = np.zeros(1200)
         i = 0
         for val in game:
             if val != 0:
@@ -35,18 +29,17 @@ def get_min_max(states):
                 s_min[i] = s[i]
     return s_max, s_min
 
+if __name__ == '__main__':
+    data = np.load('lunar_rewards.npy')
+    print(data)
+    conv_data = convert_reward_data(data)
+    print(conv_data)
+    conv_data = np.array(conv_data)
+    np.savetxt("lunar_rewards.csv", conv_data, delimiter=",")
 
-data = np.load('lunar_rewards.npy')
-print(data)
-conv_data = convert_reward_data(data)
-print(conv_data)
-conv_data = np.array(conv_data)
-np.savetxt("lunar_rewards_mb_200_50000.csv", conv_data, delimiter=",")
-
-data = np.load('lunar_timesteps.npy')
-print(data)
-conv_data = convert_reward_data(data)
-print(conv_data)
-conv_data = np.array(conv_data)
-np.savetxt("lunar_timesteps_mb_200_50000.csv", conv_data, delimiter=",")
-# pprint.PrettyPrinter(indent=4).pprint(get_min_max(data[:, 0]))
+    data = np.load('lunar_timesteps.npy')
+    print(data)
+    conv_data = convert_reward_data(data)
+    print(conv_data)
+    conv_data = np.array(conv_data)
+    np.savetxt("lunar_timesteps.csv", conv_data, delimiter=",")

@@ -1,8 +1,10 @@
-'''
-Created on Jun 26, 2016
-@author: Davide Nitti
+"""
+This is a modified version of
 https://github.com/davidenitti/ML/tree/master/RL/gymeval
-'''
+from Davide Nitti
+
+This version of DQN is made to support a model-based version.
+"""
 
 import argparse
 import matplotlib.pyplot as plt
@@ -10,29 +12,32 @@ import time
 
 import numpy as np
 import gym
-import agents_lunar_2 as agents
+import dqn_lunar as agents
 
 
 def save_data(step_history, reward_history):
+    """
+    Saves experience to files
+    :param step_history: number of time steps for each episode
+    :param reward_history: rewards for each episode
+    """
     step_history = np.array(step_history)
     reward_history = np.array(reward_history)
-
-    print(reward_history)
-
-    # np.savetxt("end_episode.csv", np.asarray(end_episode), delimiter=",")
-    np.save('pacman_timesteps.npy', step_history)
-    np.save('pacman_rewards.npy', reward_history)
+    np.save('lunar_timesteps.npy', step_history)
+    np.save('lunar_rewards.npy', reward_history)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target', nargs="?", default="MsPacman-ram-v0")
+    parser.add_argument('--target', nargs="?", default="LunarLander-v2")  # Environment
     parser.add_argument('--seed', nargs="?", default=None)
-    parser.add_argument('--episodes', nargs="?", default=1000)
-    n_agents = 10
+    parser.add_argument('--episodes', nargs="?", default=500)  # Maximum number of episodes per agent
+    n_agents = 10  # Number of different agents to train
     args = parser.parse_args()
     step_history = []
     reward_history = []
+
+    # Train each agent
     for i in range(n_agents):
         print(args)
         numepisodes = int(args.episodes)
@@ -52,56 +57,37 @@ if __name__ == '__main__':
         resultsdir = './' + nameenv
 
         env.monitor.start(resultsdir, force=True)
-        print(env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range, gym.envs.registry.spec(
-            nameenv).trials)
-        if nameenv == 'Acrobot-v0':
-            env.reward_range = (-1., 0.)
+        print(env.observation_space, env.action_space, env.spec.timestep_limit, env.reward_range,
+              gym.envs.registry.spec(nameenv).trials)
 
-        if nameenv == 'LunarLander-v2':
-            params = {
-                "memsize": 150000,
-                "scalereward": 1.,
-                "probupdate": .25,
-                "lambda": 0.15,
-                "past": 0,
-                "eps": 0.45,  # Epsilon in epsilon greedy policies
-                "decay": 0.993,  # Epsilon decay in epsilon greedy policies
-                "initial_learnrate": 0.012,
-                "decay_learnrate": 0.997,
-                "discount": 0.99,
-                "batch_size": 75,
-                "hiddenlayers": [300],
-                "regularization": [0.00001, 0.00000001],
-                "momentum": 0.05,
-                "file": None,
-                "seed": seed}
-        else:
-            params = {
-                "memsize": 150000,
-                "scalereward": 1.,
-                "probupdate": .25,
-                "lambda": 0.15,
-                "past": 0,
-                "eps": 0.45,  # Epsilon in epsilon greedy policies
-                "decay": 0.993,  # Epsilon decay in epsilon greedy policies
-                "initial_learnrate": 0.012,
-                "decay_learnrate": .997,
-                "discount": 0.99,
-                "batch_size": 75,
-                "hiddenlayers": [300],
-                "regularization": [0.00001, 0.00000001],
-                "momentum": 0.05,
-                "file": None,
-                "seed": seed}
+        params = {
+            "memsize": 150000,
+            "scalereward": 1.,
+            "probupdate": .25,
+            "lambda": 0.15,
+            "past": 0,
+            "eps": 0.45,  # Epsilon in epsilon greedy policies
+            "decay": 0.993,  # Epsilon decay in epsilon greedy policies
+            "initial_learnrate": 0.012,
+            "decay_learnrate": 0.997,
+            "discount": 0.99,
+            "batch_size": 75,
+            "hiddenlayers": [300],
+            "regularization": [0.00001, 0.00000001],
+            "momentum": 0.05,
+            "file": None,
+            "seed": seed}
         agent = agents.deepQAgent(env, env.observation_space, env.action_space, env.reward_range, **params)
         num_steps = env.spec.timestep_limit
         avg = 0.
         oldavg = 0.
 
-        pre_training_episodes = 0
-        agents.do_imagination_rollouts(agent, env, pre_training_episodes)
-        print("DONE pre-training", pre_training_episodes, "episodes")
+        # Train and perform simulations using the transition model
+        pre_training_episodes = 300  # Number of episodes to simulate using dynamics model
+        agents.do_imagination_rollouts(agent, env, pre_training_episodes, num_steps=70)
+        print("Done pre-training", pre_training_episodes, "episodes")
 
+        # Train model-free after pre-training
         plt.ion()
         fig, ax = plt.subplots(1, 2, figsize=(20, 10))
         ax[1].set_xlim(-1, 1)
@@ -163,10 +149,7 @@ if __name__ == '__main__':
         reward_history.append(env.monitor.stats_recorder.episode_rewards)
         save_data(step_history, reward_history)
 
-        # fig.savefig('last.png')
-        # env.monitor.close()
         print(agent.config)
-        # gym.upload(resultsdir, api_key='YOURAPI')
         env.monitor.close()
     step_history = np.array(step_history)
     reward_history = np.array(reward_history)

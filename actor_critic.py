@@ -1,7 +1,10 @@
 """
 This is an actor-critic implementation to experiment with model-based RL.
 The code is a modification from mohakbhardwaj's version on gym.openai.com.
-The transition model is pre-learned by gathered data and supervised learning. See model_based_learner.py
+
+The transition model is learned by first gathering data and then learnt with supervised learning.
+ --> See model_based_learner.py
+
 Link: https://gym.openai.com/evaluations/eval_KhmXmmgmSManWEtxZJoLeg
 Github: https://gist.github.com/mohakbhardwaj/3d895b41efbceff93874228cc0f39132#file-cartpole-policy-gradient-py
 """
@@ -35,7 +38,8 @@ class Actor:
         # Build the graph when instantiated
         with self.graph.as_default():
             tf.set_random_seed(1234)
-            self.weights = tf.Variable(tf.random_normal([len(self.observation_space.high), self.action_space_n]), name='weights')
+            self.weights = tf.Variable(tf.random_normal([len(self.observation_space.high), self.action_space_n]),
+                                       name='weights')
             self.biases = tf.Variable(tf.random_normal([self.action_space_n]))
 
             # Neural Network inputs
@@ -54,7 +58,7 @@ class Actor:
             # Use Adam Optimizer to optimize
 
             self.optim = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
-            # self.optim = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
+
             # Initializing all variables
             self.init = tf.initialize_all_variables()
             print("Policy Graph Constructed")
@@ -123,10 +127,14 @@ class Actor:
         return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward, history
 
     def perform_imagination_rollouts(self, time_steps, start_state):
-        """Rollout policy for one episode, update the replay memory and return total reward"""
+        """
+        Rollout policy for one episode in simulation using dynamics model,
+         update the replay memory and return total predicted reward for the simulated episode
+        """
         total_reward = 0
         curr_state = start_state
         prev_state = curr_state
+
         # Initialize lists in order to store episode data
         episode_states = []
         episode_actions = []
@@ -168,9 +176,7 @@ class Actor:
         if total_reward > self.max_reward_for_game:
             self.max_reward_for_game = total_reward
 
-        # # Update the global replay memory from rollout experience
-        # self.update_memory(rollout_episode_states, rollout_episode_actions, rollout_episode_rewards,
-        #                    rollout_episode_next_states, rollout_episode_return_from_states)
+        # Update the global replay memory from rollout experience
         self.update_memory(episode_states, episode_actions, episode_rewards, episode_next_states,
                            episode_return_from_states, False)
         return episode_states, episode_actions, episode_rewards, episode_next_states, episode_return_from_states, total_reward
@@ -194,8 +200,6 @@ class Actor:
                                                feed_dict={self.x: state, self.action_input: action,
                                                           self.y: advantage_vector[j]})
                 errors.append(error_value)
-        # print("E:", errors)
-        # print("AV:", advantage_vectors)
 
     def softmax_policy(self, state, weights, biases):
         """Defines softmax policy for tf graph"""
@@ -208,19 +212,12 @@ class Actor:
         state = state.reshape(1, len(self.observation_space.high))
         softmax_out = self.sess.run(self.policy, feed_dict={self.x: state})
 
-        # print("2", state)
-        # if random.random() < 0.01:
-        #     print("3", softmax_out)
-        # if random.random() < 0.01:
-        #     print("4.5", self.sess.run(self.weights))
         if np.math.isnan(softmax_out[0][0]):
             self.sess.close()
             exit()
         if explore:
             # Sample action from prob density
             action = np.random.choice(np.arange(max(2, self.action_space_n)), 1, replace=True, p=softmax_out[0])[0]
-            # print(action, softmax_out)
-            # action = np.random.choice([0, 1], 1, replace=True, p=softmax_out[0])[0]
         else:
             # Follow optimal policy (argmax)
             action = np.argmax(softmax_out[0])
@@ -274,8 +271,8 @@ class Critic:
         # Learning Parameters
         self.learning_rate = learning_rate
         self.discount = discount
-        self.num_epochs = 20  # 20 works
-        self.batch_size = 32  # 170 works
+        self.num_epochs = 20
+        self.batch_size = 32
         self.graph = tf.Graph()
         # Neural network is a Multi-Layered perceptron with one hidden layer containing tanh units
         with self.graph.as_default():
@@ -368,11 +365,11 @@ class Critic:
 
 class ActorCriticLearner:
     def __init__(self, env, max_episodes, episodes_before_update, discount, n_pre_training_epochs=100,
-                 n_rollout_epochs=5, action_uncertainty=0.0,
-                 logger=True):
+                 n_rollout_epochs=5, action_uncertainty=0.0, logger=True):
         self.env = env
-        self.transition_model = model_based_learner.TF_Transition_model(env)
-        # self.transition_model.restore_model(restore_path=transition_model_restore_path)
+        self.transition_model = model_based_learner.TF_Transition_model(env)  # Dynamics model
+        # self.transition_model.restore_model(restore_path=<path_to_pre_trained_dynamics_model>)
+
         self.actor = Actor(self.env, self.transition_model, n_rollout_epochs, action_uncertainty=action_uncertainty,
                            discount=discount, learning_rate=0.01)
         self.critic = Critic(self.env, discount)
@@ -395,6 +392,9 @@ class ActorCriticLearner:
         all_experience = []
 
     def pre_learn(self, max_env_time_steps, goal_avg_score, n_epochs=1, logger=True):
+        """
+        Pre-trains the agent with dynamics model.
+        """
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0
@@ -418,10 +418,8 @@ class ActorCriticLearner:
                 avg_reward = sum_reward / self.episodes_before_update
                 if logger:
                     print("Current {} episode average reward: {}".format(i, avg_reward))
-                # In this part of the code I try to reduce the effects of randomness leading to oscillations in my
-                # network by sticking to a solution if it is close to final solution.
-                # If the average reward for past batch of episodes exceeds that for solving the environment, continue with it
-                if avg_reward >= goal_avg_score:  # This is the criteria for having solved the environment by Open-AI Gym
+
+                if avg_reward >= goal_avg_score:
                     update = False
                 else:
                     update = True
@@ -434,7 +432,6 @@ class ActorCriticLearner:
                 else:
                     if logger:
                         print("Good Solution, not updating")
-                # Delete the data collected so far
                 del advantage_vectors[:]
                 self.actor.reset_memory()
                 sum_reward = 0
@@ -473,16 +470,16 @@ class ActorCriticLearner:
                 break
         return input_scale
 
-    def learn(self, max_env_time_steps, goal_avg_score, learning_rate=0.01, imagination_learning_rate=0.0001):
+    def learn(self, max_env_time_steps, goal_avg_score, learning_rate=0.01, imagination_learning_rate=0.0001,
+              gathered_data_size=600):
         self.actor.imagination_learning_rate = imagination_learning_rate
         self.actor.learning_rate = learning_rate
 
         if self.n_pre_training_epochs > 0:
-            # Gathering data for imagination rollouts
-            gathered_data_size = 600
+            # Gathering data for imagination rollouts, trains the dynamics model, and performs pre-training on agent
             input_scale = self.gather_random_data(gathered_data_size)
 
-            # Train transition model on gathered data and pre-train actor-critic from imagination rollouts
+            # Train transition model on gathered data and pre-train actor-critic from simulated episodes
             global all_experience
             training_data = np.array(all_experience)
             if len(training_data) >= gathered_data_size:
@@ -498,6 +495,7 @@ class ActorCriticLearner:
                 # Doing imagination episodes if test error is less than a threshold
                 self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_pre_training_epochs)
 
+        # Perform model-free training after pre-training
         state_action_history = []
         advantage_vectors = []
         sum_reward = 0
@@ -550,7 +548,5 @@ class ActorCriticLearner:
                         print("Avg reward over", goal_avg_score, ":", avg_rew)
                     break
 
-                    # Trying with full imagination rollouts for each episode
-                    # self.pre_learn(max_env_time_steps, goal_avg_score, n_epochs=self.n_rollout_epochs, logger=False)
         print("All real life steps:", len(all_experience))
         return state_action_history

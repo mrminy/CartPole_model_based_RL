@@ -1,11 +1,20 @@
-# from my_actor_critic import ActorCriticLearner
 import gym
 import numpy as np
 import time
-from my_actor_critic import ActorCriticLearner
+from actor_critic import ActorCriticLearner
 
 
-def gather_data_random_agent(n_games, max_time_steps, env, save_path="lunarlander_data/training_data.npy", save_data=True):
+def gather_data_random_agent(env, max_time_steps, n_games=1000, save_path="lunarlander_data_done/training_data.npy",
+                             save_data=True):
+    """
+    Gather data by following random action policy for n games
+    :param env: the environment
+    :param max_time_steps: maximum number of time steps per episode
+    :param n_games: number of games to sample from
+    :param save_path: save path
+    :param save_data: save or not?
+    :return: all experience collected
+    """
     data = []
     for i in range(n_games):
         if i % 1000 == 0:
@@ -27,8 +36,18 @@ def gather_data_random_agent(n_games, max_time_steps, env, save_path="lunarlande
     return data
 
 
-def gather_data_actor_critic(n_agents, max_episodes, max_time_steps, env, save_path="cartpole_data/training_data.npy",
-                             save_data=True):
+def gather_data_actor_critic(n_agents, max_episodes, max_time_steps, env,
+                             save_path="cartpole_data_done/actor_critic/training_data.npy", save_data=True):
+    """
+    Gathers data while learning an agent with actor-critic
+    :param n_agents: n different agents to learn
+    :param max_episodes: maximum number of episodes per agent
+    :param max_time_steps: maximum time steps per episode
+    :param env: the environment (CartPole)
+    :param save_path: save path
+    :param save_data: save or not?
+    :return: all experience collected
+    """
     data = []
     for i in range(n_agents):
         print("Gathering data from agent nr:", i)
@@ -49,18 +68,13 @@ def gather_data_actor_critic(n_agents, max_episodes, max_time_steps, env, save_p
 
 if __name__ == '__main__':
     start_time = time.time()
-    env = gym.make('MsPacman-ram-v0')
+    env = gym.make('LunarLander-v2')
 
-    # Random agent sampling
-    d = gather_data_random_agent(1000, 1000, env,
-                                 save_path="mspacman_data_done/random_agent/training_data.npy",
-                                 save_data=True)
+    # Random agent sampling from LunarLander
+    d = gather_data_random_agent(env, env.spec.timestep_limit, 1000,
+                                 save_path="lunarlander_data_done/random_agent/training_data.npy", save_data=True)
 
-    # d = gather_data_actor_critic(10, 1000, 1000, env,
-    #                              save_path="lunarlander_data_done/actor_critic/training_data.npy",
-    #                              save_data=True)
-
-    # Actor critic sampling
+    # Actor critic sampling for cartpole
     # d = gather_data_actor_critic(30, 1000, 200, env, save_path="cartpole_data/actor_critic_testing_data.npy",
     #                              save_data=True)
 
